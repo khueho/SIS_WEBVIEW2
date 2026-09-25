@@ -15,6 +15,8 @@ namespace SIS_WEBVIEW2
         // === TRẠNG THÁI ===
         private bool _isLoggedIn = false;
         private CancellationTokenSource? _cts;
+        private string? _currentPatientId;
+        private readonly string _downloadFolder = @"D:\SIS_SIEMENS_PDF";
 
         public Form1()
         {
@@ -28,6 +30,25 @@ namespace SIS_WEBVIEW2
             // Bỏ qua lỗi chứng chỉ SSL
             await webView21.CoreWebView2.CallDevToolsProtocolMethodAsync(
                 "Security.setIgnoreCertificateErrors", "{\"ignore\": true}");
+
+            // Tự động tải file vào D:\SIS_SIEMENS_PDF
+            if (!System.IO.Directory.Exists(_downloadFolder))
+            {
+                System.IO.Directory.CreateDirectory(_downloadFolder);
+            }
+
+            webView21.CoreWebView2.DownloadStarting += (s, downloadArgs) =>
+            {
+                string originalFileName = System.IO.Path.GetFileName(downloadArgs.ResultFilePath);
+                if (string.IsNullOrEmpty(originalFileName)) originalFileName = "document.pdf";
+
+                string fileName = string.IsNullOrEmpty(_currentPatientId)
+                    ? originalFileName
+                    : $"{_currentPatientId}_{originalFileName}";
+
+                downloadArgs.ResultFilePath = System.IO.Path.Combine(_downloadFolder, fileName);
+                downloadArgs.Handled = true; // Tự động tải ngầm, không hiện popup hỏi của trình duyệt
+            };
 
             webView21.NavigationCompleted += WebView21_NavigationCompleted;
             webView21.CoreWebView2.Navigate(loginUrl);
