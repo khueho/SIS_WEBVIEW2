@@ -23,10 +23,12 @@ Tự động hóa các bước thủ công trên `https://portal.sisvietnam.vn`:
 SIS_WEBVIEW2/
 ├── SIS_WEBVIEW2.sln
 └── SIS_WEBVIEW2/
-    ├── Form1.cs              ← Config, constructor, Form_Load
+    ├── Form1.cs              ← Config, constructor, Form_Load, xử lý Download ngầm
     ├── Form1.Designer.cs     ← Toàn bộ UI (panel, button, textbox...)
     ├── Form1.Login.cs        ← Logic auto-login (NavigationCompleted, AutoLogin, IsLoginPage)
-    ├── Form1.PatientId.cs    ← Logic tuần tự: FillPatientId, ClickApply, CheckActiveStatus, SetStatus
+    ├── Form1.PatientId.cs    ← Điều phối tuần tự PatientID (StartAutoProcess, ProcessPatientIds, ShowSummary)
+    ├── Form1.Activation.cs   ← Quy trình chi tiết 6 bước kích hoạt bệnh nhân (ActivatePatient)
+    ├── Form1.DomActions.cs   ← Tập hợp toàn bộ JavaScript DOM inject & ExtJS selectors
     ├── Program.cs
     └── SIS_WEBVIEW2.csproj   ← net8.0-windows, Microsoft.Web.WebView2 v1.0.4191.47
 ```
@@ -97,7 +99,7 @@ Tự động xử lý tuần tự từng PatientID trong _hardcodedPatientIds:
       1. FillPatientId(id)    → JS điền input + dispatch events
       2. await Task.Delay(300ms)
       3. ClickApply()         → JS click nút Apply
-      4. await Task.Delay(numDelay.Value ms)  ← user cấu hình (200-10000ms, mặc định 1000ms)
+      4. await Task.Delay(3000ms)  ← delay cố định 3 giây chờ kết quả tải
       5. CheckActiveStatus()  → JS kiểm tra aria-label
       6. Nếu NOT_ACTIVATED    → ActivatePatient(): Activate → Email → Save → Switch Printed & signed → Download về D:\SIS_SIEMENS_PDF
       7. Cập nhật lblStatus realtime
@@ -110,9 +112,8 @@ Tự động xử lý tuần tự từng PatientID trong _hardcodedPatientIds:
 
 | Control | Mô tả |
 |---|---|
-| `panelControl` | Panel màu tối ở phía trên, cao 65px |
-| `lblDelay` + `numDelay` | Cài delay giữa mỗi ID (200–10000ms, mặc định 1000ms) |
-| `lblStatus` | Hiển thị trạng thái realtime toàn bộ quy trình tự động |
+| `panelControl` | Panel màu tối ở phía trên, cao 50px |
+| `lblStatus` | Hiển thị trạng thái realtime toàn bộ quy trình tự động (Dock Fill panel) |
 | `webView21` | WebView2 chiếm toàn bộ phần dưới, DockStyle.Fill |
 
 ---
@@ -122,7 +123,12 @@ Tự động xử lý tuần tự từng PatientID trong _hardcodedPatientIds:
 ### ✅ Đã hoàn thành
 - [x] Auto-login vào portal (JS inject username/password/submit)
 - [x] Bỏ qua lỗi SSL certificate
-- [x] Tách code thành partial class (Form1.cs / Login.cs / PatientId.cs)
+- [x] Tách code thành các partial class dễ bảo trì:
+  - `Form1.cs`: Khởi tạo & tự động tải file ngầm
+  - `Form1.Login.cs`: Tự động đăng nhập
+  - `Form1.PatientId.cs`: Điều phối vòng lặp duyệt ID & thống kê
+  - `Form1.Activation.cs`: Quy trình 6 bước kích hoạt chi tiết
+  - `Form1.DomActions.cs`: Toàn bộ JavaScript helpers & ExtJS selectors
 - [x] UI panel điều khiển (Start/Stop/Delay/Status)
 - [x] Nhập tuần tự PatientID vào input
 - [x] Click Apply sau khi điền
@@ -131,6 +137,7 @@ Tự động xử lý tuần tự từng PatientID trong _hardcodedPatientIds:
 - [x] Popup tổng kết sau khi xử lý xong
 - [x] Flow kích hoạt hoàn chỉnh: Click Activate → Điền email → Click Save → Bật switch Printed and signed → Click Download → Tự động quay về ban đầu
 - [x] Tự động tải ngầm file PDF về thư mục `D:\SIS_SIEMENS_PDF` và đổi tên theo `[PatientID]_[FileName]`
+- [x] Đọc tự động dữ liệu từ file PDF (PdfPig + Regex) và lưu/UPSERT vào database `SisPatientDb` bảng `PatientAccessInfo` ngay sau khi tải file mới hoàn tất
 - [x] Đóng gói publish single-file self-contained win-x86
 
 ### 🔴 Vấn đề đang tồn tại

@@ -17,9 +17,11 @@ vào input → click Apply → đọc kết quả (Đã active / Chưa active / 
 
 | File | Vai trò |
 |---|---|
-| `SIS_WEBVIEW2/Form1.cs` | Config đăng nhập, constructor |
+| `SIS_WEBVIEW2/Form1.cs` | Config đăng nhập, constructor, tải file ngầm |
 | `SIS_WEBVIEW2/Form1.Login.cs` | Logic auto-login qua JS inject |
-| `SIS_WEBVIEW2/Form1.PatientId.cs` | Logic tuần tự PatientID, selectors JS |
+| `SIS_WEBVIEW2/Form1.PatientId.cs` | Điều phối vòng lặp PatientID, thống kê |
+| `SIS_WEBVIEW2/Form1.Activation.cs` | Quy trình chi tiết 6 bước kích hoạt bệnh nhân |
+| `SIS_WEBVIEW2/Form1.DomActions.cs` | Toàn bộ JS DOM helper & selectors ExtJS |
 | `SIS_WEBVIEW2/Form1.Designer.cs` | UI (panel/button/label layout) |
 
 ---

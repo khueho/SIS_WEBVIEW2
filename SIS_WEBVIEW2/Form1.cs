@@ -17,6 +17,7 @@ namespace SIS_WEBVIEW2
         private CancellationTokenSource? _cts;
         private string? _currentPatientId;
         private readonly string _downloadFolder = @"D:\SIS_SIEMENS_PDF";
+        private readonly string _sqlConnectionString = @"Server=.;Database=SisPatientDb;Trusted_Connection=True;TrustServerCertificate=True;";
 
         public Form1()
         {
@@ -46,8 +47,27 @@ namespace SIS_WEBVIEW2
                     ? originalFileName
                     : $"{_currentPatientId}_{originalFileName}";
 
-                downloadArgs.ResultFilePath = System.IO.Path.Combine(_downloadFolder, fileName);
+                string targetFilePath = System.IO.Path.Combine(_downloadFolder, fileName);
+                downloadArgs.ResultFilePath = targetFilePath;
                 downloadArgs.Handled = true; // Tự động tải ngầm, không hiện popup hỏi của trình duyệt
+
+                // Lắng nghe khi tải file PDF xong -> Đọc PDF và lưu vào SQL DB
+                var downloadOp = downloadArgs.DownloadOperation;
+                downloadOp.StateChanged += async (senderOp, eOp) =>
+                {
+                    if (downloadOp.State == CoreWebView2DownloadState.Completed)
+                    {
+                        try
+                        {
+                            var dto = await PatientAccessService.ProcessAndSavePdfAsync(targetFilePath, _sqlConnectionString);
+                            SetStatus($"💾 [Đã lưu DB] ID: {dto.PatientId} - {dto.PatientName} (Pass: {dto.TemporaryPassword})", System.Drawing.Color.LightGreen);
+                        }
+                        catch (Exception ex)
+                        {
+                            SetStatus($"⚠️ [Lỗi lưu DB] {ex.Message}", System.Drawing.Color.OrangeRed);
+                        }
+                    }
+                };
             };
 
             webView21.NavigationCompleted += WebView21_NavigationCompleted;

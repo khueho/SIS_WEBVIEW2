@@ -31,11 +31,8 @@ namespace SIS_WEBVIEW2
             webView21 = new Microsoft.Web.WebView2.WinForms.WebView2();
             panelControl = new Panel();
             lblStatus = new Label();
-            numDelay = new NumericUpDown();
-            lblDelay = new Label();
 
             ((System.ComponentModel.ISupportInitialize)webView21).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)numDelay).BeginInit();
             panelControl.SuspendLayout();
             SuspendLayout();
 
@@ -44,42 +41,16 @@ namespace SIS_WEBVIEW2
             // 
             panelControl.BackColor = Color.FromArgb(30, 30, 40);
             panelControl.Dock = DockStyle.Top;
-            panelControl.Height = 65;
-            panelControl.Padding = new Padding(8, 6, 8, 6);
-            panelControl.Controls.Add(lblDelay);
-            panelControl.Controls.Add(numDelay);
+            panelControl.Height = 50;
+            panelControl.Padding = new Padding(12, 6, 12, 6);
             panelControl.Controls.Add(lblStatus);
-
-            //
-            // lblDelay
-            //
-            lblDelay.AutoSize = true;
-            lblDelay.ForeColor = Color.Silver;
-            lblDelay.Font = new Font("Segoe UI", 8.5f);
-            lblDelay.Text = "Delay (ms):";
-            lblDelay.Location = new Point(8, 10);
-
-            //
-            // numDelay
-            //
-            numDelay.Minimum = 200;
-            numDelay.Maximum = 10000;
-            numDelay.Value = 1000;
-            numDelay.Increment = 100;
-            numDelay.Font = new Font("Segoe UI", 9f);
-            numDelay.BackColor = Color.FromArgb(50, 50, 65);
-            numDelay.ForeColor = Color.White;
-            numDelay.Location = new Point(8, 28);
-            numDelay.Width = 90;
 
             //
             // lblStatus
             //
-            lblStatus.AutoSize = false;
-            lblStatus.Size = new Size(850, 50);
-            lblStatus.Location = new Point(115, 8);
+            lblStatus.Dock = DockStyle.Fill;
             lblStatus.ForeColor = Color.LightGreen;
-            lblStatus.Font = new Font("Segoe UI", 9f);
+            lblStatus.Font = new Font("Segoe UI", 10f, FontStyle.Regular);
             lblStatus.Text = "Đang khởi động app...";
             lblStatus.TextAlign = ContentAlignment.MiddleLeft;
 
@@ -107,9 +78,7 @@ namespace SIS_WEBVIEW2
             Load += Form1_Load;
 
             panelControl.ResumeLayout(false);
-            panelControl.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)webView21).EndInit();
-            ((System.ComponentModel.ISupportInitialize)numDelay).EndInit();
             ResumeLayout(false);
         }
 
@@ -118,7 +87,5 @@ namespace SIS_WEBVIEW2
         private Microsoft.Web.WebView2.WinForms.WebView2 webView21;
         private Panel panelControl;
         private Label lblStatus;
-        private NumericUpDown numDelay;
-        private Label lblDelay;
     }
 }
