@@ -20,7 +20,8 @@ namespace SIS_WEBVIEW2
         //     "22115470",
         //     "26765254",
         //     "26768648",
-        //      "22110758"
+        //     "22110758",
+        //     "26763296",
         private static readonly List<string> _hardcodedPatientIds = new List<string>
         {
             "26767100",
@@ -37,6 +38,7 @@ namespace SIS_WEBVIEW2
             "23023028",
             "26768648",
             "22110758",
+            "26763296"
         };
 
         /// <summary>

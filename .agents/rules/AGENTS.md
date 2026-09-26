@@ -56,3 +56,4 @@ vào input → click Apply → đọc kết quả (Đã active / Chưa active / 
 - Sau mỗi thay đổi quan trọng, cập nhật mục **Trạng Thái Tiến Độ** trong `README.md`
 - Không xóa comments tiếng Việt trong code — chúng là context quan trọng
 - Khi sửa selector JS, test bằng cách chạy trong Console của DevTools WebView2 trước
+- Khi tạo các file test hay script debug, tạo trực tiếp trong thư mục project (workspace) để dễ dàng theo dõi và quản lý, tránh tạo ở các thư mục tạm bên ngoài. Xóa bỏ hoặc dọn dẹp các file tạm này khi kết thúc thử nghiệm.

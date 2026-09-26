@@ -138,6 +138,7 @@ Tự động xử lý tuần tự từng PatientID trong _hardcodedPatientIds:
 - [x] Flow kích hoạt hoàn chỉnh: Click Activate → Điền email → Click Save → Bật switch Printed and signed → Click Download → Tự động quay về ban đầu
 - [x] Tự động tải ngầm file PDF về thư mục `D:\SIS_SIEMENS_PDF` và đổi tên theo `[PatientID]_[FileName]`
 - [x] Đọc tự động dữ liệu từ file PDF (PdfPig + Regex) và lưu/UPSERT vào database `SisPatientDb` bảng `PatientAccessInfo` ngay sau khi tải file mới hoàn tất
+- [x] Sửa lỗi Regex trích xuất TemporaryPassword từ PDF bị cắt ngắn 1 ký tự (do pattern `\S+@dotquy.vn` trong lookahead gây ngắt chuỗi ngay ký tự đầu tiên), đảm bảo bóc tách chính xác trọn vẹn mật khẩu tạm 12 ký tự (chứa chữ, số, ký tự đặc biệt)
 - [x] Đóng gói publish single-file self-contained win-x86
 
 ### 🔴 Vấn đề đang tồn tại

@@ -30,13 +30,13 @@ namespace SIS_WEBVIEW2
             // Cấu trúc text stream của SIS BIRT: [PatientId][Name]https://portal...[User][Password]system@...
             var match = Regex.Match(
                 text,
-                @"(?<id>\d{6,10})\s*(?<name>.*?)\s*(?<url>https?://[^\s\d]+)\s*(?<user>\d{6,10})\s*(?<pass>.+?)(?=(?:system@|csckh@|\S+@dotquy\.vn|$))",
+                @"(?<id>\d{6,10})\s*(?<name>.*?)\s*(?<url>https?://[^\s\d]+)\s*(?<user>\d{6,10})\s*(?<pass>.+?)(?=(?:system@|csckh@|support@|admin@|info@|$))",
                 RegexOptions.Singleline | RegexOptions.IgnoreCase
             );
 
             // Cắt bỏ phần email liên hệ dính ở đuôi mật khẩu (do trong PDF không có dấu cách ngăn cách)
             string pass = match.Groups["pass"].Value.Trim();
-            pass = Regex.Replace(pass, @"(?:system@|csckh@|[a-zA-Z0-9._%+-]+@).*$", "", RegexOptions.IgnoreCase).Trim();
+            pass = Regex.Replace(pass, @"(?:system@|csckh@|support@|admin@|info@).*$", "", RegexOptions.IgnoreCase).Trim();
 
             // Fallback lấy tên từ tên file nếu PDF thiếu
             string name = match.Groups["name"].Value.Trim();
