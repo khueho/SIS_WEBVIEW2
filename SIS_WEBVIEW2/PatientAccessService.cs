@@ -94,5 +94,156 @@ namespace SIS_WEBVIEW2
             await SaveToSqlAsync(dto, connectionString);
             return dto;
         }
+
+        /// <summary>
+        /// Lưu danh sách bệnh nhân lấy từ API vào bảng DiagnosticImagingPatients.
+        /// Chống trùng: Không bao giờ đè trạng thái đã hoàn thành (ACTIVATED, ALREADY_ACTIVE).
+        /// </summary>
+        public static async Task<(int Total, int NewInserted, int Updated)> SaveApiPatientsAsync(
+            IEnumerable<DiagnosticImagingPatientDto> patients, string connectionString)
+        {
+            int total = 0;
+            int inserted = 0;
+            int updated = 0;
+
+            using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync();
+
+            const string sql = @"
+                IF NOT EXISTS (SELECT 1 FROM DiagnosticImagingPatients WHERE PatientCode = @PatientCode)
+                BEGIN
+                    INSERT INTO DiagnosticImagingPatients 
+                        (PatientCode, FullName, Address, PhoneNumber, Email, SentDate, ProcessStatus, FetchedAt)
+                    VALUES 
+                        (@PatientCode, @FullName, @Address, @PhoneNumber, @Email, @SentDate, 'PENDING', GETDATE());
+                    SELECT 1 AS Result; -- Đã thêm mới
+                END
+                ELSE
+                BEGIN
+                    UPDATE DiagnosticImagingPatients
+                    SET FullName = @FullName,
+                        Address = @Address,
+                        PhoneNumber = @PhoneNumber,
+                        Email = @Email,
+                        SentDate = @SentDate
+                    WHERE PatientCode = @PatientCode;
+                    SELECT 2 AS Result; -- Đã cập nhật
+                END";
+
+            foreach (var p in patients)
+            {
+                if (string.IsNullOrWhiteSpace(p.PatientCode)) continue;
+                total++;
+
+                using var cmd = new SqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@PatientCode", p.PatientCode);
+                cmd.Parameters.AddWithValue("@FullName", (object?)p.FullName ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@Address", (object?)p.Address ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@PhoneNumber", (object?)p.PhoneNumber ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@Email", (object?)p.Email ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@SentDate", (object?)p.SentDate ?? DBNull.Value);
+
+                var res = await cmd.ExecuteScalarAsync();
+                if (res != null && Convert.ToInt32(res) == 1)
+                {
+                    inserted++;
+                }
+                else
+                {
+                    updated++;
+                }
+            }
+
+            return (total, inserted, updated);
+        }
+
+        /// <summary>
+        /// Lấy danh sách PatientCode đang PENDING và chưa có trong PatientAccessInfo
+        /// </summary>
+        public static async Task<List<string>> GetPendingPatientCodesAsync(string connectionString)
+        {
+            var result = new List<string>();
+
+            using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync();
+
+            const string sql = @"
+                SELECT PatientCode 
+                FROM DiagnosticImagingPatients
+                WHERE ProcessStatus = 'PENDING'
+                  AND PatientCode NOT IN (SELECT PatientId FROM PatientAccessInfo)
+                ORDER BY FetchedAt ASC;";
+
+            using var cmd = new SqlCommand(sql, conn);
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                string code = reader.GetString(0);
+                if (!string.IsNullOrWhiteSpace(code))
+                {
+                    result.Add(code);
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Cập nhật trạng thái xử lý của bệnh nhân trong DiagnosticImagingPatients
+        /// </summary>
+        public static async Task UpdatePatientStatusAsync(string patientCode, string status, string connectionString)
+        {
+            if (string.IsNullOrWhiteSpace(patientCode)) return;
+
+            using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync();
+
+            const string sql = @"
+                UPDATE DiagnosticImagingPatients 
+                SET ProcessStatus = @Status,
+                    ProcessedAt = GETDATE()
+                WHERE PatientCode = @PatientCode;";
+
+            using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@Status", status);
+            cmd.Parameters.AddWithValue("@PatientCode", patientCode);
+
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        /// <summary>
+        /// Thống kê số lượng bệnh nhân theo các trạng thái
+        /// </summary>
+        public static async Task<(int Total, int Pending, int Activated, int AlreadyActive, int Failed, int NotFound)> GetStatusSummaryAsync(string connectionString)
+        {
+            using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync();
+
+            const string sql = @"
+                SELECT 
+                    COUNT(*) AS Total,
+                    SUM(CASE WHEN ProcessStatus = 'PENDING' THEN 1 ELSE 0 END) AS PendingCount,
+                    SUM(CASE WHEN ProcessStatus = 'ACTIVATED' THEN 1 ELSE 0 END) AS ActivatedCount,
+                    SUM(CASE WHEN ProcessStatus = 'ALREADY_ACTIVE' THEN 1 ELSE 0 END) AS AlreadyActiveCount,
+                    SUM(CASE WHEN ProcessStatus = 'FAILED' THEN 1 ELSE 0 END) AS FailedCount,
+                    SUM(CASE WHEN ProcessStatus = 'NOT_FOUND' THEN 1 ELSE 0 END) AS NotFoundCount
+                FROM DiagnosticImagingPatients;";
+
+            using var cmd = new SqlCommand(sql, conn);
+            using var reader = await cmd.ExecuteReaderAsync();
+            if (await reader.ReadAsync())
+            {
+                int total = reader.IsDBNull(0) ? 0 : reader.GetInt32(0);
+                int pending = reader.IsDBNull(1) ? 0 : reader.GetInt32(1);
+                int activated = reader.IsDBNull(2) ? 0 : reader.GetInt32(2);
+                int alreadyActive = reader.IsDBNull(3) ? 0 : reader.GetInt32(3);
+                int failed = reader.IsDBNull(4) ? 0 : reader.GetInt32(4);
+                int notFound = reader.IsDBNull(5) ? 0 : reader.GetInt32(5);
+                return (total, pending, activated, alreadyActive, failed, notFound);
+            }
+
+            return (0, 0, 0, 0, 0, 0);
+        }
     }
 }
+

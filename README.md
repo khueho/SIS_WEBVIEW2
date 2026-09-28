@@ -139,22 +139,26 @@ Tự động xử lý tuần tự từng PatientID trong _hardcodedPatientIds:
 - [x] Tự động tải ngầm file PDF về thư mục `D:\SIS_SIEMENS_PDF` và đổi tên theo `[PatientID]_[FileName]`
 - [x] Đọc tự động dữ liệu từ file PDF (PdfPig + Regex) và lưu/UPSERT vào database `SisPatientDb` bảng `PatientAccessInfo` ngay sau khi tải file mới hoàn tất
 - [x] Sửa lỗi Regex trích xuất TemporaryPassword từ PDF bị cắt ngắn 1 ký tự (do pattern `\S+@dotquy.vn` trong lookahead gây ngắt chuỗi ngay ký tự đầu tiên), đảm bảo bóc tách chính xác trọn vẹn mật khẩu tạm 12 ký tự (chứa chữ, số, ký tự đặc biệt)
+- [x] **Tích hợp API Chẩn đoán hình ảnh hôm nay (`SisApiService`)**: Tự động xác thực OAuth 2.0 Client Credentials và lấy danh sách bệnh nhân
+- [x] **Bảng Database riêng biệt `DiagnosticImagingPatients`**: Lưu dữ liệu nhân thân từ API và theo dõi trạng thái (`PENDING`, `ACTIVATED`, `ALREADY_ACTIVE`, `FAILED`, `NOT_FOUND`)
+- [x] **Cơ chế chống trùng lặp tự động**: Bỏ qua bệnh nhân đã kích hoạt/đã có mật khẩu trong `PatientAccessInfo`, không chạy lại quy trình vô ích
+- [x] **Tự động quét định kỳ 15 phút**: Background timer tự đếm ngược 15:00, tự động gọi API, nạp các ca mới phát sinh vào hàng đợi
+- [x] **Nâng cấp UI SIS Auto**: Thêm thanh công cụ điều khiển API, nút Quét ngay, nút Dừng/Chạy, Checkbox 15 phút, đồng hồ đếm ngược và thanh thống kê số lượng trực tiếp
+- [x] Đổi tên app thành "SIS Auto - Quản Lý & Kích Hoạt Bệnh Nhân"
 - [x] Đóng gói publish single-file self-contained win-x86
 
 ### 🔴 Vấn đề đang tồn tại
 - [ ] **Selector không ổn định:** `ext-modern-element-123/140` là ExtJS dynamic ID,
   có thể thay đổi nếu trang cập nhật. Cần tìm selector bền vững hơn (aria-label, placeholder, v.v.)
-- [ ] **Danh sách ID hardcode:** Hiện chỉ có 1 ID test (`26767120`). Cần cơ chế
-  để user nhập danh sách (TextBox, file .txt, file Excel)
 
 ### 📋 TODO tiếp theo (ưu tiên cao → thấp)
-1. **[HIGH]** Test flow đầy đủ với nhiều ID — xác nhận selector JS còn đúng không
-2. **[HIGH]** Nếu selector sai → dùng DevTools của WebView2 để inspect lại
+1. **[HIGH]** Cung cấp `client_secret` thật vào file `api_secret.txt` và chạy thử luồng API thực tế
+2. **[HIGH]** Test flow đầy đủ với danh sách ID từ API — xác nhận selector JS còn đúng không
+3. **[HIGH]** Nếu selector sai → dùng DevTools của WebView2 để inspect lại
    và cập nhật `FillPatientId()` + `ClickApply()` trong `Form1.PatientId.cs`
-3. **[MED]** Cho phép user nhập danh sách ID qua TextBox (thay vì hardcode)
 4. **[MED]** Xuất kết quả ra file CSV/Excel sau khi xử lý
-5. **[LOW]** Đổi tên app thành "SIS Auto" (đổi `Text` trong Form1.Designer.cs)
-6. **[LOW]** Đóng gói lại sau khi có thay đổi mới
+5. **[LOW]** Đóng gói lại sau khi kiểm thử ổn định
+
 
 ---
 

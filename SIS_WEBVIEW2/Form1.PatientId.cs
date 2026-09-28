@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Threading;
@@ -8,59 +9,43 @@ namespace SIS_WEBVIEW2
 {
     public partial class Form1
     {
-        // TODO: Thay thế bằng dữ liệu lấy từ API hoặc input UI
-        // "26767100",
-        //     "24049600",
-        //     "26766162",
-        //     "25105778",
-        //     "26765358",
-        //     "25105778",
-        //     "25045371,
-        //     "22922488",
-        //     "22115470",
-        //     "26765254",
-        //     "26768648",
-        //     "22110758",
-        //     "26763296",
-        private static readonly List<string> _hardcodedPatientIds = new List<string>
-        {
-            "26767100",
-            "24049600",
-            "26766162",
-            "25105778",
-            "26765358",
-            "25105778",
-            "25045371",
-            "22922488",
-            "22115470",
-            "26765254",
-            "23903909",
-            "23023028",
-            "26768648",
-            "22110758",
-            "26763296"
-        };
-
         /// <summary>
-        /// Bắt đầu xử lý tự động tuần tự danh sách Patient ID
+        /// Bắt đầu xử lý tự động tuần tự danh sách Patient ID lấy từ Database (Status = PENDING)
         /// </summary>
         public async Task StartAutoProcess()
         {
-            List<string> ids = _hardcodedPatientIds;
-
-            if (ids.Count == 0)
+            if (_isProcessingQueue)
             {
-                SetStatus("⚠️ Danh sách Patient ID trống!", Color.Orange);
+                SetStatus("ℹ️ Tiến trình xử lý đang chạy...", Color.Yellow);
                 return;
             }
 
+            List<string> ids = await PatientAccessService.GetPendingPatientCodesAsync(_sqlConnectionString);
+
+            if (ids.Count == 0)
+            {
+                SetStatus("✅ Không có Patient ID nào đang chờ kích hoạt trong Database!", Color.LightGreen);
+                await RefreshStatusSummaryAsync();
+                return;
+            }
+
+            _isProcessingQueue = true;
             _cts = new CancellationTokenSource();
-            await ProcessPatientIds(ids, _cts.Token);
+
+            try
+            {
+                await ProcessPatientIds(ids, _cts.Token);
+            }
+            finally
+            {
+                _isProcessingQueue = false;
+                await RefreshStatusSummaryAsync();
+            }
         }
 
         private async Task ProcessPatientIds(List<string> ids, CancellationToken token)
         {
-            const int delay = 3000; // Delay cố định 3 giây (3000ms) chờ web phản hồi
+            const int delay = 3000; // Delay 3s chờ web phản hồi
             int total = ids.Count;
 
             int countActivated     = 0; // nút Edit  → đã active sẵn
@@ -81,6 +66,7 @@ namespace SIS_WEBVIEW2
                 if (!filled)
                 {
                     SetStatus($"⚠️ [{i + 1}/{total}] Không tìm thấy input PatientID! ID: {id}", Color.Orange);
+                    await PatientAccessService.UpdatePatientStatusAsync(id, "NOT_FOUND", _sqlConnectionString);
                     countNoResult++;
                     try { await Task.Delay(delay, token); } catch (TaskCanceledException) { break; }
                     continue;
@@ -94,7 +80,8 @@ namespace SIS_WEBVIEW2
                 if (!clicked)
                 {
                     SetStatus($"⚠️ [{i + 1}/{total}] Không tìm thấy nút Apply! ID: {id}", Color.Orange);
-                    countNoResult++;
+                    await PatientAccessService.UpdatePatientStatusAsync(id, "FAILED", _sqlConnectionString);
+                    countFailed++;
                     try { await Task.Delay(delay, token); } catch (TaskCanceledException) { break; }
                     continue;
                 }
@@ -102,14 +89,15 @@ namespace SIS_WEBVIEW2
                 // Chờ kết quả tải xong
                 try { await Task.Delay(delay, token); } catch (TaskCanceledException) { break; }
 
-                // Bước 3: Kiểm tra trạng thái
+                // Bước 3: Kiểm tra trạng thái trên Portal
                 SetStatus($"🔎 [{i + 1}/{total}] Kiểm tra trạng thái: {id}", Color.LightBlue);
                 string status = await CheckActiveStatus();
 
                 switch (status)
                 {
                     case "ACTIVATED":
-                        SetStatus($"✅ [{i + 1}/{total}] Đã active: {id}", Color.LightGreen);
+                        SetStatus($"✅ [{i + 1}/{total}] Đã active sẵn: {id}", Color.LightGreen);
+                        await PatientAccessService.UpdatePatientStatusAsync(id, "ALREADY_ACTIVE", _sqlConnectionString);
                         countActivated++;
                         break;
 
@@ -121,29 +109,37 @@ namespace SIS_WEBVIEW2
                         if (activateOk)
                         {
                             SetStatus($"🎉 [{i + 1}/{total}] Đã kích hoạt xong: {id}", Color.LightGreen);
+                            await PatientAccessService.UpdatePatientStatusAsync(id, "ACTIVATED", _sqlConnectionString);
                             countJustActivated++;
                         }
                         else
                         {
                             SetStatus($"❌ [{i + 1}/{total}] Kích hoạt thất bại: {id}", Color.Tomato);
+                            await PatientAccessService.UpdatePatientStatusAsync(id, "FAILED", _sqlConnectionString);
                             countFailed++;
                         }
                         break;
 
                     default:
                         SetStatus($"❓ [{i + 1}/{total}] Không có kết quả: {id}", Color.Gray);
+                        await PatientAccessService.UpdatePatientStatusAsync(id, "NOT_FOUND", _sqlConnectionString);
                         countNoResult++;
                         break;
                 }
 
+                _ = RefreshStatusSummaryAsync();
                 try { await Task.Delay(500, token); } catch (TaskCanceledException) { break; }
             }
             _currentPatientId = null;
 
             if (!token.IsCancellationRequested)
             {
-                SetStatus($"✅ Hoàn thành! Đã xử lý {total} ID.", Color.LightGreen);
+                SetStatus($"✅ Hoàn thành lượt xử lý {total} ID.", Color.LightGreen);
                 ShowSummary(total, countActivated, countJustActivated, countFailed, countNoResult);
+            }
+            else
+            {
+                SetStatus("⏹ Tiến trình xử lý đã tạm dừng theo yêu cầu người dùng.", Color.Orange);
             }
         }
 

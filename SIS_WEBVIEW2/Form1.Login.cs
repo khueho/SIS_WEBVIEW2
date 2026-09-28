@@ -22,11 +22,11 @@ namespace SIS_WEBVIEW2
                 // Đã redirect ra ngoài → đăng nhập thành công
                 _isLoggedIn = true;
                 webView21.NavigationCompleted -= WebView21_NavigationCompleted;
-                SetStatus("✅ Đăng nhập thành công! Đang tự động xử lý tuần tự danh sách ID...", System.Drawing.Color.LightGreen);
+                SetStatus("✅ Đăng nhập thành công! Đang tự động quét API và xử lý danh sách bệnh nhân...", System.Drawing.Color.LightGreen);
 
-                // Chờ 2 giây cho trang chủ ổn định rồi tự động xử lý
+                // Chờ 2 giây cho trang chủ ổn định rồi tự động quét API và kích hoạt
                 await Task.Delay(2000);
-                await StartAutoProcess();
+                await FetchApiDataAsync(triggerProcessIfIdle: true);
             }
         }
 

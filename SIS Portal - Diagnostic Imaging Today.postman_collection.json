@@ -1,0 +1,235 @@
+{
+  "info": {
+    "_postman_id": "27650d53-6372-435f-b67f-a87ce1b286d4",
+    "name": "SIS Portal - Diagnostic Imaging Today",
+    "description": "API xác thực và truy vấn danh sách bệnh nhân chẩn đoán hình ảnh trong ngày",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "40770251"
+  },
+  "item": [
+    {
+      "name": "1. Get Access Token",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "if (jsonData.access_token) {",
+              "    pm.collectionVariables.set(\"accessToken\", jsonData.access_token);",
+              "    console.log(\"Saved accessToken to collection variable successfully.\");",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/x-www-form-urlencoded",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {
+              "key": "grant_type",
+              "value": "client_credentials",
+              "type": "text"
+            },
+            {
+              "key": "client_id",
+              "value": "{{clientId}}",
+              "type": "text"
+            },
+            {
+              "key": "client_secret",
+              "value": "{{clientSecret}}",
+              "type": "text"
+            },
+            {
+              "key": "scope",
+              "value": "{{scope}}",
+              "type": "text"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/connect/token",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "connect",
+            "token"
+          ]
+        },
+        "description": "Xác thực OAuth 2.0 Client Credentials để lấy Bearer token. Script Tests sẽ tự động lưu access_token vào biến accessToken của collection."
+      },
+      "response": [
+        {
+          "name": "200 OK Example",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials"
+                },
+                {
+                  "key": "client_id",
+                  "value": "DigitalHealthSolutions_HospitalIntegration"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "<hospital-client-secret>"
+                },
+                {
+                  "scope": "HospitalIntegration"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/connect/token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "connect",
+                "token"
+              ]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n  \"access_token\": \"<access-token>\",\n  \"token_type\": \"Bearer\",\n  \"expires_in\": 86400,\n  \"scope\": \"HospitalIntegration\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "2. Get Diagnostic Imaging Patients Today",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{accessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/portal/his/patients/diagnostic-imaging/today?__tenant={{tenantId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "portal",
+            "his",
+            "patients",
+            "diagnostic-imaging",
+            "today"
+          ],
+          "query": [
+            {
+              "key": "__tenant",
+              "value": "{{tenantId}}",
+              "description": "Tenant ID xác thực phân quyền hệ thống"
+            }
+          ]
+        },
+        "description": "Truy vấn danh sách bệnh nhân chẩn đoán hình ảnh trong ngày sử dụng Bearer token."
+      },
+      "response": [
+        {
+          "name": "200 OK Example",
+          "originalRequest": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/portal/his/patients/diagnostic-imaging/today?__tenant={{tenantId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "portal",
+                "his",
+                "patients",
+                "diagnostic-imaging",
+                "today"
+              ],
+              "query": [
+                {
+                  "key": "__tenant",
+                  "value": "{{tenantId}}"
+                }
+              ]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            }
+          ],
+          "cookie": [],
+          "body": "[\n  {\n    \"patientCode\": \"26767120\",\n    \"fullName\": \"NGUYỄN VĂN A\",\n    \"address\": \"Cần Thơ\",\n    \"phoneNumber\": \"0901234567\",\n    \"email\": \"nguyenvana@example.com\",\n    \"sentDate\": \"2026/09/23\"\n  }\n]"
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://dhs.sisvietnam.vn"
+    },
+    {
+      "key": "tenantId",
+      "value": "3a0f747c-57b6-753b-ba21-3987e8e93b9a"
+    },
+    {
+      "key": "clientId",
+      "value": "DigitalHealthSolutions_HospitalIntegration"
+    },
+    {
+      "key": "clientSecret",
+      "value": "<hospital-client-secret>"
+    },
+    {
+      "key": "scope",
+      "value": "HospitalIntegration"
+    },
+    {
+      "key": "accessToken",
+      "value": ""
+    }
+  ]
+}

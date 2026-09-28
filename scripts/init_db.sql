@@ -35,3 +35,29 @@ BEGIN
     PRINT N'ℹ️ Bảng PatientAccessInfo đã tồn tại.';
 END
 GO
+
+-- 3. Tạo Bảng DiagnosticImagingPatients (Lưu danh sách lấy từ API) nếu chưa tồn tại
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[DiagnosticImagingPatients]') AND type in (N'U'))
+BEGIN
+    CREATE TABLE [dbo].[DiagnosticImagingPatients] (
+        [PatientCode]    NVARCHAR(50)  NOT NULL,
+        [FullName]       NVARCHAR(255) NULL,
+        [Address]        NVARCHAR(500) NULL,
+        [PhoneNumber]    NVARCHAR(50)  NULL,
+        [Email]          NVARCHAR(255) NULL,
+        [SentDate]       NVARCHAR(50)  NULL,
+        [ProcessStatus]  NVARCHAR(50)  NULL DEFAULT 'PENDING',
+        [FetchedAt]      DATETIME      NULL DEFAULT GETDATE(),
+        [ProcessedAt]    DATETIME      NULL,
+        
+        CONSTRAINT [PK_DiagnosticImagingPatients] PRIMARY KEY CLUSTERED ([PatientCode] ASC)
+    );
+    CREATE INDEX [IX_DiagnosticImagingPatients_Status] ON [dbo].[DiagnosticImagingPatients]([ProcessStatus]);
+    PRINT N'✅ Đã tạo Bảng DiagnosticImagingPatients thành công.';
+END
+ELSE
+BEGIN
+    PRINT N'ℹ️ Bảng DiagnosticImagingPatients đã tồn tại.';
+END
+GO
+
