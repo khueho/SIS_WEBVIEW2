@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -19,9 +20,12 @@ namespace SIS_WEBVIEW2
         private readonly string _apiBaseUrl = "https://dhs.sisvietnam.vn";
         private readonly string _apiTenantId = "3a0f747c-57b6-753b-ba21-3987e8e93b9a";
         private readonly string _apiClientId = "DigitalHealthSolutions_HospitalIntegration";
-        private string _apiClientSecret = ""; // Đọc từ file api_secret.txt nếu có
+        private readonly string _apiClientSecret = "XPWFParRQldtZopqdDFLPYblIzauxuWT";
         private readonly string _apiScope = "HospitalIntegration";
         private SisApiService? _apiService;
+
+        // Cấu hình số lượng bệnh nhân lấy từ API để test (Đặt <= 0 nếu muốn lấy TOÀN BỘ danh sách)
+        private int _testLimitPatientCount = 4;
 
         // === CẤU HÌNH HỆ THỐNG & DB ===
         private readonly string _downloadFolder = @"D:\SIS_SIEMENS_PDF";
@@ -29,7 +33,7 @@ namespace SIS_WEBVIEW2
 
         // === TIMER & HÀNG ĐỢI ===
         private System.Windows.Forms.Timer? _autoTimer;
-        private const int POLLING_INTERVAL_SECONDS = 15 * 60; // 15 phút = 900 giây
+        private const int POLLING_INTERVAL_SECONDS = 2 * 60; // 2 phút = 120 giây
         private int _countdownSeconds = POLLING_INTERVAL_SECONDS;
         private bool _isProcessingQueue = false;
 
@@ -98,22 +102,10 @@ namespace SIS_WEBVIEW2
         }
 
         /// <summary>
-        /// Khởi tạo cấu hình API Service và đồng hồ đếm ngược 15 phút
+        /// Khởi tạo cấu hình API Service và đồng hồ đếm ngược 2 phút
         /// </summary>
         private void InitializeApiAndTimer()
         {
-            // Tự động nạp secret từ file api_secret.txt nếu có
-            string baseDirSecret = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "api_secret.txt");
-            string rootSecret = Path.Combine(Directory.GetCurrentDirectory(), "api_secret.txt");
-            if (File.Exists(baseDirSecret))
-            {
-                _apiClientSecret = File.ReadAllText(baseDirSecret).Trim();
-            }
-            else if (File.Exists(rootSecret))
-            {
-                _apiClientSecret = File.ReadAllText(rootSecret).Trim();
-            }
-
             _apiService = new SisApiService
             {
                 BaseUrl = _apiBaseUrl,
@@ -165,17 +157,26 @@ namespace SIS_WEBVIEW2
 
             if (string.IsNullOrWhiteSpace(_apiService.ClientSecret))
             {
-                SetStatus("⚠️ Chưa có ClientSecret API! Hãy tạo file api_secret.txt chứa secret.", Color.Orange);
+                SetStatus("⚠️ Chưa cấu hình ClientSecret cho SIS API!", Color.Orange);
                 return;
             }
 
             try
             {
                 SetStatus("🌐 Đang gọi API lấy danh sách bệnh nhân chẩn đoán hình ảnh hôm nay...", Color.Cyan);
-                var patients = await _apiService.GetTodayDiagnosticImagingPatientsAsync();
+                var rawPatients = await _apiService.GetTodayDiagnosticImagingPatientsAsync();
+
+                // Lấy danh sách bệnh nhân theo số lượng cấu hình _testLimitPatientCount
+                var patients = _testLimitPatientCount > 0
+                    ? rawPatients.Take(_testLimitPatientCount).ToList()
+                    : rawPatients;
 
                 var (total, newInserted, updated) = await PatientAccessService.SaveApiPatientsAsync(patients, _sqlConnectionString);
-                SetStatus($"✅ API trả về {total} BN (Mới: +{newInserted}, Cập nhật: {updated}).", Color.LightGreen);
+                string testInfo = patients.Count > 0 
+                    ? string.Join(", ", patients.Select(p => $"{p.PatientCode} - {p.FullName}"))
+                    : "Không có dữ liệu";
+                string tag = _testLimitPatientCount > 0 ? $"TEST {_testLimitPatientCount} BN" : "TOÀN BỘ";
+                SetStatus($"✅ [{tag}] Đã lấy {patients.Count} ca: {testInfo} (Mới: +{newInserted}, Cập nhật: {updated}).", Color.LightGreen);
 
                 await RefreshStatusSummaryAsync();
 

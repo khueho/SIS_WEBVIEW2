@@ -142,8 +142,8 @@ Tự động xử lý tuần tự từng PatientID trong _hardcodedPatientIds:
 - [x] **Tích hợp API Chẩn đoán hình ảnh hôm nay (`SisApiService`)**: Tự động xác thực OAuth 2.0 Client Credentials và lấy danh sách bệnh nhân
 - [x] **Bảng Database riêng biệt `DiagnosticImagingPatients`**: Lưu dữ liệu nhân thân từ API và theo dõi trạng thái (`PENDING`, `ACTIVATED`, `ALREADY_ACTIVE`, `FAILED`, `NOT_FOUND`)
 - [x] **Cơ chế chống trùng lặp tự động**: Bỏ qua bệnh nhân đã kích hoạt/đã có mật khẩu trong `PatientAccessInfo`, không chạy lại quy trình vô ích
-- [x] **Tự động quét định kỳ 15 phút**: Background timer tự đếm ngược 15:00, tự động gọi API, nạp các ca mới phát sinh vào hàng đợi
-- [x] **Nâng cấp UI SIS Auto**: Thêm thanh công cụ điều khiển API, nút Quét ngay, nút Dừng/Chạy, Checkbox 15 phút, đồng hồ đếm ngược và thanh thống kê số lượng trực tiếp
+- [x] **Tự động quét định kỳ 2 phút**: Background timer tự đếm ngược 02:00, tự động gọi API, nạp các ca mới phát sinh vào hàng đợi
+- [x] **Nâng cấp UI SIS Auto**: Thêm thanh công cụ điều khiển API, nút Quét ngay, nút Dừng/Chạy, Checkbox 2 phút, đồng hồ đếm ngược và thanh thống kê số lượng trực tiếp
 - [x] Đổi tên app thành "SIS Auto - Quản Lý & Kích Hoạt Bệnh Nhân"
 - [x] Đóng gói publish single-file self-contained win-x86
 

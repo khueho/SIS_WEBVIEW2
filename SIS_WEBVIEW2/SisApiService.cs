@@ -44,13 +44,19 @@ namespace SIS_WEBVIEW2
         public string Scope { get; set; } = string.Empty;
     }
 
+    public class DiagnosticImagingApiResponseDto
+    {
+        [JsonPropertyName("data")]
+        public List<DiagnosticImagingPatientDto> Data { get; set; } = new List<DiagnosticImagingPatientDto>();
+    }
+
     public class SisApiService
     {
         private readonly HttpClient _httpClient;
         public string BaseUrl { get; set; } = "https://dhs.sisvietnam.vn";
         public string TenantId { get; set; } = "3a0f747c-57b6-753b-ba21-3987e8e93b9a";
         public string ClientId { get; set; } = "DigitalHealthSolutions_HospitalIntegration";
-        public string ClientSecret { get; set; } = string.Empty;
+        public string ClientSecret { get; set; } = "XPWFParRQldtZopqdDFLPYblIzauxuWT";
         public string Scope { get; set; } = "HospitalIntegration";
 
         private string? _cachedToken;
@@ -131,13 +137,18 @@ namespace SIS_WEBVIEW2
                 throw new HttpRequestException($"Lỗi gọi API danh sách bệnh nhân ({(int)response.StatusCode}): {content}");
             }
 
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                return new List<DiagnosticImagingPatientDto>();
+            }
+
             var options = new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
             };
 
-            var list = JsonSerializer.Deserialize<List<DiagnosticImagingPatientDto>>(content, options);
-            return list ?? new List<DiagnosticImagingPatientDto>();
+            var apiResult = JsonSerializer.Deserialize<DiagnosticImagingApiResponseDto>(content, options);
+            return apiResult?.Data ?? new List<DiagnosticImagingPatientDto>();
         }
     }
 }
