@@ -10,12 +10,12 @@ namespace SIS_WEBVIEW2
         /// Quy trình kích hoạt patient:
         ///   1. Click nút Activate
         ///   2. Chờ form email hiện ra
-        ///   3. Điền [patientId]@dummy.com
+        ///   3. Điền email (lấy email thật từ API, nếu không có thì fallback [patientId]@gmail.com)
         ///   4. Click Save
         ///   5. Chờ UI tài liệu tải & Bật switch 'Printed and signed'
         ///   6. Click Download → UI tự quay về ban đầu
         /// </summary>
-        private async Task<bool> ActivatePatient(string patientId, CancellationToken token)
+        private async Task<bool> ActivatePatient(string patientId, string? rawEmail, CancellationToken token)
         {
             // Bước 1: Click nút Activate
             SetStatus("🖱️ [1/6] Đang click nút Activate...", Color.Gold);
@@ -26,8 +26,22 @@ namespace SIS_WEBVIEW2
             try { await Task.Delay(2000, token); } catch (TaskCanceledException) { return false; }
 
             // Bước 2: Điền email
-            string email = $"{patientId}@dummy.com";
-            SetStatus($"✉️ [2/6] Đang điền email: {email}", Color.Gold);
+            string email;
+            bool isRealEmail = !string.IsNullOrWhiteSpace(rawEmail) 
+                               && rawEmail.Contains("@") 
+                               && !PatientAccessService.IsFakeEmail(rawEmail, patientId);
+
+            if (isRealEmail)
+            {
+                email = rawEmail!.Split(new[] { ';', ',' }, System.StringSplitOptions.RemoveEmptyEntries)[0].Trim();
+                SetStatus($"✉️ [2/6] Đang điền email thật: {email}", Color.Gold);
+            }
+            else
+            {
+                email = $"{patientId}@gmail.com";
+                SetStatus($"✉️ [2/6] Đang điền email tạm: {email} (BN chưa có email)", Color.Gold);
+            }
+
             if (!await FillEmailField(email)) return false;
 
             // Dừng 1.5s để nhìn thấy email đã được điền

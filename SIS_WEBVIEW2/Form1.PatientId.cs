@@ -20,9 +20,9 @@ namespace SIS_WEBVIEW2
                 return;
             }
 
-            List<string> ids = await PatientAccessService.GetPendingPatientCodesAsync(_sqlConnectionString);
+            List<PendingPatientItem> pendingPatients = await PatientAccessService.GetPendingPatientsAsync(_sqlConnectionString);
 
-            if (ids.Count == 0)
+            if (pendingPatients.Count == 0)
             {
                 SetStatus("✅ Không có Patient ID nào đang chờ kích hoạt trong Database!", Color.LightGreen);
                 await RefreshStatusSummaryAsync();
@@ -34,7 +34,7 @@ namespace SIS_WEBVIEW2
 
             try
             {
-                await ProcessPatientIds(ids, _cts.Token);
+                await ProcessPatientList(pendingPatients, _cts.Token);
             }
             finally
             {
@@ -45,8 +45,14 @@ namespace SIS_WEBVIEW2
 
         private async Task ProcessPatientIds(List<string> ids, CancellationToken token)
         {
+            var list = ids.Select(id => new PendingPatientItem { PatientCode = id }).ToList();
+            await ProcessPatientList(list, token);
+        }
+
+        private async Task ProcessPatientList(List<PendingPatientItem> patients, CancellationToken token)
+        {
             const int delay = 3000; // Delay 3s chờ web phản hồi
-            int total = ids.Count;
+            int total = patients.Count;
 
             int countActivated     = 0; // nút Edit  → đã active sẵn
             int countJustActivated = 0; // vừa được activate trong phiên này
@@ -57,7 +63,9 @@ namespace SIS_WEBVIEW2
             {
                 if (token.IsCancellationRequested) break;
 
-                string id = ids[i];
+                var patient = patients[i];
+                string id = patient.PatientCode;
+                string? email = patient.Email;
                 _currentPatientId = id;
                 SetStatus($"⏳ [{i + 1}/{total}] Đang nhập: {id}", Color.Yellow);
 
@@ -104,7 +112,7 @@ namespace SIS_WEBVIEW2
                     case "NOT_ACTIVATED":
                         // Bước 4: Tự động kích hoạt (Quy trình chi tiết trong Form1.Activation.cs)
                         SetStatus($"🔄 [{i + 1}/{total}] Chưa active, đang kích hoạt: {id}", Color.Gold);
-                        bool activateOk = await ActivatePatient(id, token);
+                        bool activateOk = await ActivatePatient(id, email, token);
 
                         if (activateOk)
                         {

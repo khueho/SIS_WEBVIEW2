@@ -17,6 +17,12 @@ namespace SIS_WEBVIEW2
         public string PortalUrl { get; set; } = "https://portal.sisvietnam.vn";
     }
 
+    public class PendingPatientItem
+    {
+        public string PatientCode { get; set; } = string.Empty;
+        public string? Email { get; set; }
+    }
+
     public static class PatientAccessService
     {
         /// <summary>
@@ -30,7 +36,7 @@ namespace SIS_WEBVIEW2
             // Cấu trúc text stream của SIS BIRT: [PatientId][Name]https://portal...[User][Password]system@...
             var match = Regex.Match(
                 text,
-                @"(?<id>\d{6,10})\s*(?<name>.*?)\s*(?<url>https?://[^\s\d]+)\s*(?<user>\d{6,10})\s*(?<pass>.+?)(?=(?:system@|csckh@|support@|admin@|info@|$))",
+                @"(?<id>\d{6,10})\s*(?<name>.*?)\s*(?<url>https?://[^\s\d]+)\s*(?<user>\k<id>|\d{6,10}?)\s*(?<pass>.+?)(?=(?:system@|csckh@|support@|admin@|info@|$))",
                 RegexOptions.Singleline | RegexOptions.IgnoreCase
             );
 
@@ -68,8 +74,8 @@ namespace SIS_WEBVIEW2
 
             const string sql = @"
                 IF NOT EXISTS (SELECT 1 FROM PatientAccessInfo WHERE PatientId = @Id)
-                    INSERT INTO PatientAccessInfo (PatientId, PatientName, Username, TemporaryPassword, PortalUrl, SavedAt)
-                    VALUES (@Id, @Name, @User, @Pass, @Url, GETDATE());
+                    INSERT INTO PatientAccessInfo (PatientId, PatientName, Username, TemporaryPassword, PortalUrl, SavedAt, EmailSentStatus)
+                    VALUES (@Id, @Name, @User, @Pass, @Url, GETDATE(), 'PENDING');
                 ELSE
                     UPDATE PatientAccessInfo 
                     SET PatientName = @Name, Username = @User, TemporaryPassword = @Pass, PortalUrl = @Url, SavedAt = GETDATE()
@@ -93,6 +99,24 @@ namespace SIS_WEBVIEW2
             var dto = ExtractFromPdf(pdfPath);
             await SaveToSqlAsync(dto, connectionString);
             return dto;
+        }
+
+        /// <summary>
+        /// Kiểm tra xem email có phải là email giả lập do API/hệ thống tự sinh ({PatientCode}@gmail.com) hay không.
+        /// </summary>
+        public static bool IsFakeEmail(string? email, string? patientCode)
+        {
+            if (string.IsNullOrWhiteSpace(email)) return true;
+            string cleanEmail = email.Trim();
+            if (!string.IsNullOrWhiteSpace(patientCode))
+            {
+                string cleanCode = patientCode.Trim();
+                if (cleanEmail.Equals($"{cleanCode}@gmail.com", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /// <summary>
@@ -135,12 +159,15 @@ namespace SIS_WEBVIEW2
                 if (string.IsNullOrWhiteSpace(p.PatientCode)) continue;
                 total++;
 
+                // Nếu email là dạng giả lập {patientId}@gmail.com từ API thì lưu NULL để biết BN chưa có email thật
+                string? realEmail = IsFakeEmail(p.Email, p.PatientCode) ? null : p.Email?.Trim();
+
                 using var cmd = new SqlCommand(sql, conn);
                 cmd.Parameters.AddWithValue("@PatientCode", p.PatientCode);
                 cmd.Parameters.AddWithValue("@FullName", (object?)p.FullName ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@Address", (object?)p.Address ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@PhoneNumber", (object?)p.PhoneNumber ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@Email", (object?)p.Email ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@Email", (object?)realEmail ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@SentDate", (object?)p.SentDate ?? DBNull.Value);
 
                 var res = await cmd.ExecuteScalarAsync();
@@ -158,17 +185,17 @@ namespace SIS_WEBVIEW2
         }
 
         /// <summary>
-        /// Lấy danh sách PatientCode đang PENDING và chưa có trong PatientAccessInfo
+        /// Lấy danh sách bệnh nhân đang PENDING (kèm Email nếu có) và chưa có trong PatientAccessInfo
         /// </summary>
-        public static async Task<List<string>> GetPendingPatientCodesAsync(string connectionString)
+        public static async Task<List<PendingPatientItem>> GetPendingPatientsAsync(string connectionString)
         {
-            var result = new List<string>();
+            var result = new List<PendingPatientItem>();
 
             using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync();
 
             const string sql = @"
-                SELECT PatientCode 
+                SELECT PatientCode, Email 
                 FROM DiagnosticImagingPatients
                 WHERE ProcessStatus = 'PENDING'
                   AND PatientCode NOT IN (SELECT PatientId FROM PatientAccessInfo)
@@ -179,13 +206,34 @@ namespace SIS_WEBVIEW2
             while (await reader.ReadAsync())
             {
                 string code = reader.GetString(0);
+                string? email = reader.IsDBNull(1) ? null : reader.GetString(1);
+
+                // Loại trừ nếu trong DB còn sót email giả lập
+                if (IsFakeEmail(email, code))
+                {
+                    email = null;
+                }
+
                 if (!string.IsNullOrWhiteSpace(code))
                 {
-                    result.Add(code);
+                    result.Add(new PendingPatientItem
+                    {
+                        PatientCode = code,
+                        Email = email
+                    });
                 }
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Lấy danh sách PatientCode đang PENDING và chưa có trong PatientAccessInfo
+        /// </summary>
+        public static async Task<List<string>> GetPendingPatientCodesAsync(string connectionString)
+        {
+            var patients = await GetPendingPatientsAsync(connectionString);
+            return patients.Select(p => p.PatientCode).ToList();
         }
 
         /// <summary>
@@ -243,6 +291,93 @@ namespace SIS_WEBVIEW2
             }
 
             return (0, 0, 0, 0, 0, 0);
+        }
+
+        /// <summary>
+        /// Tự động kiểm tra và thêm các cột theo dõi gửi email vào database nếu chưa tồn tại
+        /// </summary>
+        public static async Task EnsureDatabaseSchemaAsync(string connectionString)
+        {
+            try
+            {
+                using var conn = new SqlConnection(connectionString);
+                await conn.OpenAsync();
+
+                const string sql = @"
+                    IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('PatientAccessInfo') AND name = 'EmailSentStatus')
+                    BEGIN
+                        ALTER TABLE PatientAccessInfo ADD EmailSentStatus NVARCHAR(50) NULL DEFAULT 'PENDING';
+                    END
+
+                    IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('PatientAccessInfo') AND name = 'EmailSentAt')
+                    BEGIN
+                        ALTER TABLE PatientAccessInfo ADD EmailSentAt DATETIME NULL;
+                    END
+
+                    IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('PatientAccessInfo') AND name = 'EmailError')
+                    BEGIN
+                        ALTER TABLE PatientAccessInfo ADD EmailError NVARCHAR(MAX) NULL;
+                    END";
+
+                using var cmd = new SqlCommand(sql, conn);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch
+            {
+                // Bỏ qua lỗi nếu không đủ quyền DDL, app vẫn hoạt động bình thường
+            }
+        }
+
+        /// <summary>
+        /// Truy vấn email thật của bệnh nhân từ bảng DiagnosticImagingPatients (loại bỏ email giả lập)
+        /// </summary>
+        public static async Task<string?> GetPatientRealEmailAsync(string patientId, string connectionString)
+        {
+            if (string.IsNullOrWhiteSpace(patientId)) return null;
+
+            using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync();
+
+            const string sql = @"SELECT TOP 1 Email FROM DiagnosticImagingPatients WHERE PatientCode = @PatientCode;";
+            using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@PatientCode", patientId);
+
+            var obj = await cmd.ExecuteScalarAsync();
+            if (obj != null && obj != DBNull.Value)
+            {
+                string email = obj.ToString()!.Trim();
+                if (!IsFakeEmail(email, patientId) && email.Contains("@"))
+                {
+                    return email;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Cập nhật trạng thái gửi email cho bệnh nhân trong PatientAccessInfo
+        /// </summary>
+        public static async Task UpdateEmailSentStatusAsync(string patientId, string status, string? error, string connectionString)
+        {
+            if (string.IsNullOrWhiteSpace(patientId)) return;
+
+            using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync();
+
+            const string sql = @"
+                UPDATE PatientAccessInfo
+                SET EmailSentStatus = @Status,
+                    EmailSentAt = CASE WHEN @Status = 'SENT' THEN GETDATE() ELSE EmailSentAt END,
+                    EmailError = @Error
+                WHERE PatientId = @PatientId;";
+
+            using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@PatientId", patientId);
+            cmd.Parameters.AddWithValue("@Status", status);
+            cmd.Parameters.AddWithValue("@Error", (object?)error ?? DBNull.Value);
+
+            await cmd.ExecuteNonQueryAsync();
         }
     }
 }

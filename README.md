@@ -29,8 +29,10 @@ SIS_WEBVIEW2/
     ├── Form1.PatientId.cs    ← Điều phối tuần tự PatientID (StartAutoProcess, ProcessPatientIds, ShowSummary)
     ├── Form1.Activation.cs   ← Quy trình chi tiết 6 bước kích hoạt bệnh nhân (ActivatePatient)
     ├── Form1.DomActions.cs   ← Tập hợp toàn bộ JavaScript DOM inject & ExtJS selectors
+    ├── EmailService.cs       ← Dịch vụ gửi email thông tin tài khoản qua MailKit (HTML responsive + đính kèm PDF)
+    ├── email_config.json     ← File cấu hình SMTP server, tài khoản gửi và mẫu email
     ├── Program.cs
-    └── SIS_WEBVIEW2.csproj   ← net8.0-windows, Microsoft.Web.WebView2 v1.0.4191.47
+    └── SIS_WEBVIEW2.csproj   ← net8.0-windows, Microsoft.Web.WebView2 v1.0.4191.47, MailKit v4.18.1
 ```
 
 ---
@@ -137,10 +139,12 @@ Tự động xử lý tuần tự từng PatientID trong _hardcodedPatientIds:
 - [x] Popup tổng kết sau khi xử lý xong
 - [x] Flow kích hoạt hoàn chỉnh: Click Activate → Điền email → Click Save → Bật switch Printed and signed → Click Download → Tự động quay về ban đầu
 - [x] Tự động tải ngầm file PDF về thư mục `D:\SIS_SIEMENS_PDF` và đổi tên theo `[PatientID]_[FileName]`
-- [x] Đọc tự động dữ liệu từ file PDF (PdfPig + Regex) và lưu/UPSERT vào database `SisPatientDb` bảng `PatientAccessInfo` ngay sau khi tải file mới hoàn tất
-- [x] Sửa lỗi Regex trích xuất TemporaryPassword từ PDF bị cắt ngắn 1 ký tự (do pattern `\S+@dotquy.vn` trong lookahead gây ngắt chuỗi ngay ký tự đầu tiên), đảm bảo bóc tách chính xác trọn vẹn mật khẩu tạm 12 ký tự (chứa chữ, số, ký tự đặc biệt)
-- [x] **Tích hợp API Chẩn đoán hình ảnh hôm nay (`SisApiService`)**: Tự động xác thực OAuth 2.0 Client Credentials và lấy danh sách bệnh nhân
+- [x] Sửa lỗi Regex trích xuất TemporaryPassword từ PDF:
+  - Khắc phục lỗi pattern lookahead gây ngắt chuỗi trước đây.
+  - Khắc phục lỗi `(?<user>\d{6,10})` tham lam (greedy) vô tình nuốt mất chữ số đầu tiên của mật khẩu khi mật khẩu bắt đầu bằng chữ số (dùng `\k<id>` để map khớp chính xác mã bệnh nhân, đảm bảo mật khẩu như `3S6@xcs7!vk8`, `2xCh6!CaySX6` giữ nguyên vẹn 12 ký tự).
 - [x] **Bảng Database riêng biệt `DiagnosticImagingPatients`**: Lưu dữ liệu nhân thân từ API và theo dõi trạng thái (`PENDING`, `ACTIVATED`, `ALREADY_ACTIVE`, `FAILED`, `NOT_FOUND`)
+- [x] **Truyền email thật từ API khi kích hoạt**: Tự động lấy email thật của bệnh nhân từ database API để điền vào popup kích hoạt trên Portal. Nếu bệnh nhân không có email thì tự động fallback về `{patientId}@gmail.com`.
+- [x] **Tự động gửi Email thông tin tài khoản (MailKit)**: Sau khi kích hoạt và bóc tách PDF thành công, tự động kiểm tra nếu bệnh nhân có email thật thì gửi email HTML chuyên nghiệp chứa Username, Mật khẩu tạm và PortalUrl. Cập nhật trạng thái gửi vào database (`EmailSentStatus`, `EmailSentAt`, `EmailError`).
 - [x] **Cơ chế chống trùng lặp tự động**: Bỏ qua bệnh nhân đã kích hoạt/đã có mật khẩu trong `PatientAccessInfo`, không chạy lại quy trình vô ích
 - [x] **Tự động quét định kỳ 2 phút**: Background timer tự đếm ngược 02:00, tự động gọi API, nạp các ca mới phát sinh vào hàng đợi
 - [x] **Nâng cấp UI SIS Auto**: Thêm thanh công cụ điều khiển API, nút Quét ngay, nút Dừng/Chạy, Checkbox 2 phút, đồng hồ đếm ngược và thanh thống kê số lượng trực tiếp

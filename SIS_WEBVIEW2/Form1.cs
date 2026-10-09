@@ -51,6 +51,9 @@ namespace SIS_WEBVIEW2
         {
             InitializeApiAndTimer();
 
+            // Đảm bảo schema DB có đầy đủ các cột cần thiết (bao gồm theo dõi gửi email)
+            _ = PatientAccessService.EnsureDatabaseSchemaAsync(_sqlConnectionString);
+
             await webView21.EnsureCoreWebView2Async(null);
 
             // Bỏ qua lỗi chứng chỉ SSL
@@ -88,6 +91,39 @@ namespace SIS_WEBVIEW2
                             await PatientAccessService.UpdatePatientStatusAsync(dto.PatientId, "ACTIVATED", _sqlConnectionString);
                             SetStatus($"💾 [Đã lưu DB] ID: {dto.PatientId} - {dto.PatientName} (Pass: {dto.TemporaryPassword})", Color.LightGreen);
                             await RefreshStatusSummaryAsync();
+
+                            // Tự động gửi email thông tin tài khoản nếu bệnh nhân có email thật
+                            _ = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    string? realEmail = await PatientAccessService.GetPatientRealEmailAsync(dto.PatientId, _sqlConnectionString);
+                                    if (!string.IsNullOrWhiteSpace(realEmail))
+                                    {
+                                        SetStatus($"✉️ Đang gửi thông tin tài khoản đến email: {realEmail}...", Color.Cyan);
+                                        var (sendOk, sendErr) = await EmailService.SendAccountInfoEmailAsync(dto, realEmail);
+                                        if (sendOk)
+                                        {
+                                            await PatientAccessService.UpdateEmailSentStatusAsync(dto.PatientId, "SENT", null, _sqlConnectionString);
+                                            SetStatus($"📧 [Đã gửi Email] Thành công đến {realEmail} (BN: {dto.PatientName})", Color.LightGreen);
+                                        }
+                                        else
+                                        {
+                                            await PatientAccessService.UpdateEmailSentStatusAsync(dto.PatientId, "FAILED", sendErr, _sqlConnectionString);
+                                            SetStatus($"⚠️ [Gửi Email thất bại] {sendErr}", Color.Orange);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        await PatientAccessService.UpdateEmailSentStatusAsync(dto.PatientId, "NO_EMAIL", null, _sqlConnectionString);
+                                    }
+                                }
+                                catch (Exception exEmail)
+                                {
+                                    await PatientAccessService.UpdateEmailSentStatusAsync(dto.PatientId, "FAILED", exEmail.Message, _sqlConnectionString);
+                                    SetStatus($"⚠️ [Lỗi gửi email] {exEmail.Message}", Color.Orange);
+                                }
+                            });
                         }
                         catch (Exception ex)
                         {

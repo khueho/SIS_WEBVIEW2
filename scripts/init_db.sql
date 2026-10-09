@@ -25,6 +25,9 @@ BEGIN
         [TemporaryPassword] NVARCHAR(255) NULL,
         [PortalUrl]         NVARCHAR(500) NULL DEFAULT 'https://portal.sisvietnam.vn',
         [SavedAt]           DATETIME      NULL DEFAULT GETDATE(),
+        [EmailSentStatus]   NVARCHAR(50)  NULL DEFAULT 'PENDING',
+        [EmailSentAt]       DATETIME      NULL,
+        [EmailError]        NVARCHAR(MAX) NULL,
         
         CONSTRAINT [PK_PatientAccessInfo] PRIMARY KEY CLUSTERED ([PatientId] ASC)
     );
@@ -32,7 +35,25 @@ BEGIN
 END
 ELSE
 BEGIN
-    PRINT N'ℹ️ Bảng PatientAccessInfo đã tồn tại.';
+    PRINT N'ℹ️ Bảng PatientAccessInfo đã tồn tại. Đang kiểm tra bổ sung cột Email...';
+    
+    IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[PatientAccessInfo]') AND name = 'EmailSentStatus')
+    BEGIN
+        ALTER TABLE [dbo].[PatientAccessInfo] ADD [EmailSentStatus] NVARCHAR(50) NULL DEFAULT 'PENDING';
+        PRINT N'  + Đã thêm cột EmailSentStatus.';
+    END
+
+    IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[PatientAccessInfo]') AND name = 'EmailSentAt')
+    BEGIN
+        ALTER TABLE [dbo].[PatientAccessInfo] ADD [EmailSentAt] DATETIME NULL;
+        PRINT N'  + Đã thêm cột EmailSentAt.';
+    END
+
+    IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[PatientAccessInfo]') AND name = 'EmailError')
+    BEGIN
+        ALTER TABLE [dbo].[PatientAccessInfo] ADD [EmailError] NVARCHAR(MAX) NULL;
+        PRINT N'  + Đã thêm cột EmailError.';
+    END
 END
 GO
 

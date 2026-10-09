@@ -1,0 +1,10 @@
+{
+  "SmtpHost": "smtp.gmail.com",
+  "SmtpPort": 587,
+  "UseSsl": false,
+  "UseStartTls": true,
+  "SenderEmail": "khueho11a3@gmail.com",
+  "SenderPassword": "edkv nacz drgl mocs",
+  "SenderDisplayName": "Bệnh viện Đa Khoa Quốc Tế S.I.S Cần Thơ",
+  "Subject": "[S.I.S Vietnam] Thông tin tài khoản tra cứu hồ sơ bệnh án điện tử"
+}
