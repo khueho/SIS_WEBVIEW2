@@ -1,4 +1,4 @@
-# SIS_WORKER — Tự động kích hoạt tài khoản bệnh nhân (Windows Service)
+﻿# SIS_WORKER — Tự động kích hoạt tài khoản bệnh nhân (Windows Service)
 
 **Dự án:** .NET 8 Worker Service (chạy ngầm, không giao diện).
 **Mục tiêu:** Tự động quét danh sách bệnh nhân chẩn đoán hình ảnh trong ngày từ API SIS, kích hoạt tài khoản
@@ -35,7 +35,7 @@ các operation `queryUsers`, `resolveFullPatient`, `isEmailUnique`, `saveUser`.
 ## Cấu trúc
 
 ```
-SIS_WEBVIEW2.sln
+SIS_WORKER.sln
 └── SIS_WORKER/
     ├── Program.cs              ← Host: Windows Service, Serilog (log file xoay ngày), bind config
     ├── ActivationWorker.cs     ← BackgroundService: vòng lặp 2 phút (API → DB → hàng đợi)
