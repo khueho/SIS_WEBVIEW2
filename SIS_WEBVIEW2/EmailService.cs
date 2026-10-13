@@ -18,7 +18,9 @@ namespace SIS_WEBVIEW2
         public string SenderPassword { get; set; } = "";
         public string SenderDisplayName { get; set; } = "Bệnh viện Đa Khoa Quốc Tế S.I.S Cần Thơ";
         public string Subject { get; set; } = "[S.I.S Vietnam] Thông tin tài khoản tra cứu hồ sơ bệnh án điện tử";
+        public string? OverrideRecipientEmail { get; set; } = null;
     }
+
 
     public static class EmailService
     {
@@ -69,12 +71,17 @@ namespace SIS_WEBVIEW2
             PatientAccessDto accountInfo,
             string recipientEmail)
         {
-            if (string.IsNullOrWhiteSpace(recipientEmail))
+            var config = LoadConfig();
+
+            // Nếu có cấu hình OverrideRecipientEmail, ưu tiên chuyển hướng người nhận sang email này để test
+            string targetRecipient = !string.IsNullOrWhiteSpace(config.OverrideRecipientEmail)
+                ? config.OverrideRecipientEmail.Trim()
+                : recipientEmail;
+
+            if (string.IsNullOrWhiteSpace(targetRecipient))
             {
                 return (false, "Địa chỉ email người nhận trống.");
             }
-
-            var config = LoadConfig();
 
             if (string.IsNullOrWhiteSpace(config.SenderEmail) || string.IsNullOrWhiteSpace(config.SenderPassword))
             {
@@ -85,8 +92,18 @@ namespace SIS_WEBVIEW2
             {
                 var message = new MimeMessage();
                 message.From.Add(new MailboxAddress(config.SenderDisplayName, config.SenderEmail));
-                message.To.Add(new MailboxAddress(accountInfo.PatientName, recipientEmail.Trim()));
-                message.Subject = config.Subject;
+                message.To.Add(new MailboxAddress(accountInfo.PatientName, targetRecipient));
+
+                // Nếu đang dùng email giả lập để test, ghi rõ vào tiêu đề để người test nhận biết
+                if (!string.IsNullOrWhiteSpace(config.OverrideRecipientEmail))
+                {
+                    message.Subject = $"[TEST GIẢ LẬP -> {recipientEmail}] {config.Subject}";
+                }
+                else
+                {
+                    message.Subject = config.Subject;
+                }
+
 
                 var builder = new BodyBuilder
                 {

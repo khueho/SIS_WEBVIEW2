@@ -29,10 +29,13 @@ SIS_WEBVIEW2/
     ├── Form1.PatientId.cs    ← Điều phối tuần tự PatientID (StartAutoProcess, ProcessPatientIds, ShowSummary)
     ├── Form1.Activation.cs   ← Quy trình chi tiết 6 bước kích hoạt bệnh nhân (ActivatePatient)
     ├── Form1.DomActions.cs   ← Tập hợp toàn bộ JavaScript DOM inject & ExtJS selectors
+    ├── PatientAccessService.cs ← Xử lý đọc PDF, trích xuất dữ liệu, truy vấn PostgreSQL
+    ├── DatabaseConfig.cs     ← Quản lý cấu hình & kết nối PostgreSQL
+    ├── db_config.json        ← File cấu hình Host/Port/User/Password PostgreSQL
     ├── EmailService.cs       ← Dịch vụ gửi email thông tin tài khoản qua MailKit (HTML responsive + đính kèm PDF)
     ├── email_config.json     ← File cấu hình SMTP server, tài khoản gửi và mẫu email
     ├── Program.cs
-    └── SIS_WEBVIEW2.csproj   ← net8.0-windows, Microsoft.Web.WebView2 v1.0.4191.47, MailKit v4.18.1
+    └── SIS_WEBVIEW2.csproj   ← net8.0-windows, Microsoft.Web.WebView2 v1.0.4191.47, MailKit v4.18.1, Npgsql v10.0.3
 ```
 
 ---
@@ -43,6 +46,7 @@ SIS_WEBVIEW2/
 |---|---|
 | Framework | .NET 8 Windows (WinForms) |
 | Browser engine | Microsoft WebView2 v1.0.4191.47 |
+| Database | PostgreSQL (Npgsql v10.0.3) |
 | Target URL | `https://portal.sisvietnam.vn/vi/home` |
 | Build | `dotnet build` / Visual Studio 2022 |
 | Publish | Single-file self-contained `win-x86` |
@@ -145,10 +149,13 @@ Tự động xử lý tuần tự từng PatientID trong _hardcodedPatientIds:
 - [x] **Bảng Database riêng biệt `DiagnosticImagingPatients`**: Lưu dữ liệu nhân thân từ API và theo dõi trạng thái (`PENDING`, `ACTIVATED`, `ALREADY_ACTIVE`, `FAILED`, `NOT_FOUND`)
 - [x] **Truyền email thật từ API khi kích hoạt**: Tự động lấy email thật của bệnh nhân từ database API để điền vào popup kích hoạt trên Portal. Nếu bệnh nhân không có email thì tự động fallback về `{patientId}@gmail.com`.
 - [x] **Tự động gửi Email thông tin tài khoản (MailKit)**: Sau khi kích hoạt và bóc tách PDF thành công, tự động kiểm tra nếu bệnh nhân có email thật thì gửi email HTML chuyên nghiệp chứa Username, Mật khẩu tạm và PortalUrl. Cập nhật trạng thái gửi vào database (`EmailSentStatus`, `EmailSentAt`, `EmailError`).
+- [x] **Hỗ trợ Giả lập Email nhận khi gửi mail (Test Mode)**: Thêm cấu hình `OverrideRecipientEmail` trong `email_config.json` (đang cấu hình `hanho11a3@gmail.com`). Chỉ can thiệp luồng gửi email thông tin tài khoản của `EmailService` sang hòm thư test, giữ nguyên 100% quy trình điền email trên Portal SIS (`Form1.Activation.cs`).
+
 - [x] **Cơ chế chống trùng lặp tự động**: Bỏ qua bệnh nhân đã kích hoạt/đã có mật khẩu trong `PatientAccessInfo`, không chạy lại quy trình vô ích
 - [x] **Tự động quét định kỳ 2 phút**: Background timer tự đếm ngược 02:00, tự động gọi API, nạp các ca mới phát sinh vào hàng đợi
 - [x] **Nâng cấp UI SIS Auto**: Thêm thanh công cụ điều khiển API, nút Quét ngay, nút Dừng/Chạy, Checkbox 2 phút, đồng hồ đếm ngược và thanh thống kê số lượng trực tiếp
 - [x] Đổi tên app thành "SIS Auto - Quản Lý & Kích Hoạt Bệnh Nhân"
+- [x] **Chuyển đổi hoàn toàn sang PostgreSQL**: Thay thế `Microsoft.Data.SqlClient` bằng `Npgsql` (v10.0.3), chuyển đổi toàn bộ câu lệnh sang chuẩn PostgreSQL (Upsert `ON CONFLICT DO UPDATE`, hàm thời gian `NOW()`), tự động tạo schema (`EnsureDatabaseSchemaAsync`) và bổ sung file cấu hình kết nối linh hoạt `db_config.json`.
 - [x] Đóng gói publish single-file self-contained win-x86
 
 ### 🔴 Vấn đề đang tồn tại

@@ -29,7 +29,7 @@ namespace SIS_WEBVIEW2
 
         // === CẤU HÌNH HỆ THỐNG & DB ===
         private readonly string _downloadFolder = @"D:\SIS_SIEMENS_PDF";
-        private readonly string _sqlConnectionString = @"Server=.;Database=SisPatientDb;Trusted_Connection=True;TrustServerCertificate=True;";
+        private readonly string _sqlConnectionString = DatabaseConfigService.GetConnectionString();
 
         // === TIMER & HÀNG ĐỢI ===
         private System.Windows.Forms.Timer? _autoTimer;
@@ -92,20 +92,35 @@ namespace SIS_WEBVIEW2
                             SetStatus($"💾 [Đã lưu DB] ID: {dto.PatientId} - {dto.PatientName} (Pass: {dto.TemporaryPassword})", Color.LightGreen);
                             await RefreshStatusSummaryAsync();
 
-                            // Tự động gửi email thông tin tài khoản nếu bệnh nhân có email thật
+                            // Tự động gửi email thông tin tài khoản nếu bệnh nhân có email thật (hoặc đang test giả lập)
                             _ = Task.Run(async () =>
                             {
                                 try
                                 {
+                                    var emailConfig = EmailService.LoadConfig();
                                     string? realEmail = await PatientAccessService.GetPatientRealEmailAsync(dto.PatientId, _sqlConnectionString);
-                                    if (!string.IsNullOrWhiteSpace(realEmail))
+
+                                    // Nếu có cấu hình OverrideRecipientEmail thì gửi về email giả lập để test
+                                    string? targetEmail = !string.IsNullOrWhiteSpace(emailConfig.OverrideRecipientEmail)
+                                        ? emailConfig.OverrideRecipientEmail.Trim()
+                                        : realEmail;
+
+                                    if (!string.IsNullOrWhiteSpace(targetEmail))
                                     {
-                                        SetStatus($"✉️ Đang gửi thông tin tài khoản đến email: {realEmail}...", Color.Cyan);
-                                        var (sendOk, sendErr) = await EmailService.SendAccountInfoEmailAsync(dto, realEmail);
+                                        if (!string.IsNullOrWhiteSpace(emailConfig.OverrideRecipientEmail))
+                                        {
+                                            SetStatus($"🧪 [Test Giả Lập] Đang gửi thông tin tài khoản đến: {targetEmail}...", Color.Cyan);
+                                        }
+                                        else
+                                        {
+                                            SetStatus($"✉️ Đang gửi thông tin tài khoản đến email: {targetEmail}...", Color.Cyan);
+                                        }
+
+                                        var (sendOk, sendErr) = await EmailService.SendAccountInfoEmailAsync(dto, targetEmail);
                                         if (sendOk)
                                         {
                                             await PatientAccessService.UpdateEmailSentStatusAsync(dto.PatientId, "SENT", null, _sqlConnectionString);
-                                            SetStatus($"📧 [Đã gửi Email] Thành công đến {realEmail} (BN: {dto.PatientName})", Color.LightGreen);
+                                            SetStatus($"📧 [Đã gửi Email] Thành công đến {targetEmail} (BN: {dto.PatientName})", Color.LightGreen);
                                         }
                                         else
                                         {

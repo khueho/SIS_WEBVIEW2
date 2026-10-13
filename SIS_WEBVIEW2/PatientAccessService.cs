@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using Microsoft.Data.SqlClient;
+using Npgsql;
+using NpgsqlTypes;
 using UglyToad.PdfPig;
 
 namespace SIS_WEBVIEW2
@@ -63,30 +65,31 @@ namespace SIS_WEBVIEW2
         }
 
         /// <summary>
-        /// Lưu hoặc cập nhật thông tin bệnh nhân vào SQL Server (tránh trùng khóa)
+        /// Lưu hoặc cập nhật thông tin bệnh nhân vào PostgreSQL (tránh trùng khóa qua ON CONFLICT)
         /// </summary>
         public static async Task SaveToSqlAsync(PatientAccessDto dto, string connectionString)
         {
             if (string.IsNullOrWhiteSpace(dto.PatientId)) return;
 
-            using var conn = new SqlConnection(connectionString);
+            using var conn = new NpgsqlConnection(connectionString);
             await conn.OpenAsync();
 
             const string sql = @"
-                IF NOT EXISTS (SELECT 1 FROM PatientAccessInfo WHERE PatientId = @Id)
-                    INSERT INTO PatientAccessInfo (PatientId, PatientName, Username, TemporaryPassword, PortalUrl, SavedAt, EmailSentStatus)
-                    VALUES (@Id, @Name, @User, @Pass, @Url, GETDATE(), 'PENDING');
-                ELSE
-                    UPDATE PatientAccessInfo 
-                    SET PatientName = @Name, Username = @User, TemporaryPassword = @Pass, PortalUrl = @Url, SavedAt = GETDATE()
-                    WHERE PatientId = @Id;";
+                INSERT INTO PatientAccessInfo (PatientId, PatientName, Username, TemporaryPassword, PortalUrl, SavedAt, EmailSentStatus)
+                VALUES (@Id, @Name, @User, @Pass, @Url, NOW(), 'PENDING')
+                ON CONFLICT (PatientId) DO UPDATE
+                SET PatientName = EXCLUDED.PatientName,
+                    Username = EXCLUDED.Username,
+                    TemporaryPassword = EXCLUDED.TemporaryPassword,
+                    PortalUrl = EXCLUDED.PortalUrl,
+                    SavedAt = NOW();";
 
-            using var cmd = new SqlCommand(sql, conn);
-            cmd.Parameters.AddWithValue("@Id", dto.PatientId);
-            cmd.Parameters.AddWithValue("@Name", dto.PatientName);
-            cmd.Parameters.AddWithValue("@User", dto.Username);
-            cmd.Parameters.AddWithValue("@Pass", dto.TemporaryPassword);
-            cmd.Parameters.AddWithValue("@Url", dto.PortalUrl);
+            using var cmd = new NpgsqlCommand(sql, conn);
+            cmd.Parameters.Add(new NpgsqlParameter("@Id", NpgsqlDbType.Varchar) { Value = dto.PatientId });
+            cmd.Parameters.Add(new NpgsqlParameter("@Name", NpgsqlDbType.Varchar) { Value = dto.PatientName });
+            cmd.Parameters.Add(new NpgsqlParameter("@User", NpgsqlDbType.Varchar) { Value = dto.Username });
+            cmd.Parameters.Add(new NpgsqlParameter("@Pass", NpgsqlDbType.Varchar) { Value = dto.TemporaryPassword });
+            cmd.Parameters.Add(new NpgsqlParameter("@Url", NpgsqlDbType.Text) { Value = dto.PortalUrl });
 
             await cmd.ExecuteNonQueryAsync();
         }
@@ -120,8 +123,8 @@ namespace SIS_WEBVIEW2
         }
 
         /// <summary>
-        /// Lưu danh sách bệnh nhân lấy từ API vào bảng DiagnosticImagingPatients.
-        /// Chống trùng: Không bao giờ đè trạng thái đã hoàn thành (ACTIVATED, ALREADY_ACTIVE).
+        /// Lưu danh sách bệnh nhân lấy từ API vào bảng DiagnosticImagingPatients trên PostgreSQL.
+        /// Chống trùng: Dùng ON CONFLICT (PatientCode) DO UPDATE.
         /// </summary>
         public static async Task<(int Total, int NewInserted, int Updated)> SaveApiPatientsAsync(
             IEnumerable<DiagnosticImagingPatientDto> patients, string connectionString)
@@ -130,29 +133,21 @@ namespace SIS_WEBVIEW2
             int inserted = 0;
             int updated = 0;
 
-            using var conn = new SqlConnection(connectionString);
+            using var conn = new NpgsqlConnection(connectionString);
             await conn.OpenAsync();
 
             const string sql = @"
-                IF NOT EXISTS (SELECT 1 FROM DiagnosticImagingPatients WHERE PatientCode = @PatientCode)
-                BEGIN
-                    INSERT INTO DiagnosticImagingPatients 
-                        (PatientCode, FullName, Address, PhoneNumber, Email, SentDate, ProcessStatus, FetchedAt)
-                    VALUES 
-                        (@PatientCode, @FullName, @Address, @PhoneNumber, @Email, @SentDate, 'PENDING', GETDATE());
-                    SELECT 1 AS Result; -- Đã thêm mới
-                END
-                ELSE
-                BEGIN
-                    UPDATE DiagnosticImagingPatients
-                    SET FullName = @FullName,
-                        Address = @Address,
-                        PhoneNumber = @PhoneNumber,
-                        Email = @Email,
-                        SentDate = @SentDate
-                    WHERE PatientCode = @PatientCode;
-                    SELECT 2 AS Result; -- Đã cập nhật
-                END";
+                INSERT INTO DiagnosticImagingPatients 
+                    (PatientCode, FullName, Address, PhoneNumber, Email, SentDate, ProcessStatus, FetchedAt)
+                VALUES 
+                    (@PatientCode, @FullName, @Address, @PhoneNumber, @Email, @SentDate, 'PENDING', NOW())
+                ON CONFLICT (PatientCode) DO UPDATE
+                SET FullName = EXCLUDED.FullName,
+                    Address = EXCLUDED.Address,
+                    PhoneNumber = EXCLUDED.PhoneNumber,
+                    Email = EXCLUDED.Email,
+                    SentDate = EXCLUDED.SentDate
+                RETURNING (xmax = 0) AS is_inserted;";
 
             foreach (var p in patients)
             {
@@ -162,16 +157,16 @@ namespace SIS_WEBVIEW2
                 // Nếu email là dạng giả lập {patientId}@gmail.com từ API thì lưu NULL để biết BN chưa có email thật
                 string? realEmail = IsFakeEmail(p.Email, p.PatientCode) ? null : p.Email?.Trim();
 
-                using var cmd = new SqlCommand(sql, conn);
-                cmd.Parameters.AddWithValue("@PatientCode", p.PatientCode);
-                cmd.Parameters.AddWithValue("@FullName", (object?)p.FullName ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@Address", (object?)p.Address ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@PhoneNumber", (object?)p.PhoneNumber ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@Email", (object?)realEmail ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@SentDate", (object?)p.SentDate ?? DBNull.Value);
+                using var cmd = new NpgsqlCommand(sql, conn);
+                cmd.Parameters.Add(new NpgsqlParameter("@PatientCode", NpgsqlDbType.Varchar) { Value = p.PatientCode });
+                cmd.Parameters.Add(new NpgsqlParameter("@FullName", NpgsqlDbType.Varchar) { Value = (object?)p.FullName ?? DBNull.Value });
+                cmd.Parameters.Add(new NpgsqlParameter("@Address", NpgsqlDbType.Text) { Value = (object?)p.Address ?? DBNull.Value });
+                cmd.Parameters.Add(new NpgsqlParameter("@PhoneNumber", NpgsqlDbType.Varchar) { Value = (object?)p.PhoneNumber ?? DBNull.Value });
+                cmd.Parameters.Add(new NpgsqlParameter("@Email", NpgsqlDbType.Varchar) { Value = (object?)realEmail ?? DBNull.Value });
+                cmd.Parameters.Add(new NpgsqlParameter("@SentDate", NpgsqlDbType.Text) { Value = (object?)p.SentDate ?? DBNull.Value });
 
                 var res = await cmd.ExecuteScalarAsync();
-                if (res != null && Convert.ToInt32(res) == 1)
+                if (res is bool isInserted && isInserted)
                 {
                     inserted++;
                 }
@@ -191,7 +186,7 @@ namespace SIS_WEBVIEW2
         {
             var result = new List<PendingPatientItem>();
 
-            using var conn = new SqlConnection(connectionString);
+            using var conn = new NpgsqlConnection(connectionString);
             await conn.OpenAsync();
 
             const string sql = @"
@@ -201,7 +196,7 @@ namespace SIS_WEBVIEW2
                   AND PatientCode NOT IN (SELECT PatientId FROM PatientAccessInfo)
                 ORDER BY FetchedAt ASC;";
 
-            using var cmd = new SqlCommand(sql, conn);
+            using var cmd = new NpgsqlCommand(sql, conn);
             using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync())
             {
@@ -243,18 +238,18 @@ namespace SIS_WEBVIEW2
         {
             if (string.IsNullOrWhiteSpace(patientCode)) return;
 
-            using var conn = new SqlConnection(connectionString);
+            using var conn = new NpgsqlConnection(connectionString);
             await conn.OpenAsync();
 
             const string sql = @"
                 UPDATE DiagnosticImagingPatients 
                 SET ProcessStatus = @Status,
-                    ProcessedAt = GETDATE()
+                    ProcessedAt = NOW()
                 WHERE PatientCode = @PatientCode;";
 
-            using var cmd = new SqlCommand(sql, conn);
-            cmd.Parameters.AddWithValue("@Status", status);
-            cmd.Parameters.AddWithValue("@PatientCode", patientCode);
+            using var cmd = new NpgsqlCommand(sql, conn);
+            cmd.Parameters.Add(new NpgsqlParameter("@Status", NpgsqlDbType.Varchar) { Value = status });
+            cmd.Parameters.Add(new NpgsqlParameter("@PatientCode", NpgsqlDbType.Varchar) { Value = patientCode });
 
             await cmd.ExecuteNonQueryAsync();
         }
@@ -264,29 +259,29 @@ namespace SIS_WEBVIEW2
         /// </summary>
         public static async Task<(int Total, int Pending, int Activated, int AlreadyActive, int Failed, int NotFound)> GetStatusSummaryAsync(string connectionString)
         {
-            using var conn = new SqlConnection(connectionString);
+            using var conn = new NpgsqlConnection(connectionString);
             await conn.OpenAsync();
 
             const string sql = @"
                 SELECT 
                     COUNT(*) AS Total,
-                    SUM(CASE WHEN ProcessStatus = 'PENDING' THEN 1 ELSE 0 END) AS PendingCount,
-                    SUM(CASE WHEN ProcessStatus = 'ACTIVATED' THEN 1 ELSE 0 END) AS ActivatedCount,
-                    SUM(CASE WHEN ProcessStatus = 'ALREADY_ACTIVE' THEN 1 ELSE 0 END) AS AlreadyActiveCount,
-                    SUM(CASE WHEN ProcessStatus = 'FAILED' THEN 1 ELSE 0 END) AS FailedCount,
-                    SUM(CASE WHEN ProcessStatus = 'NOT_FOUND' THEN 1 ELSE 0 END) AS NotFoundCount
+                    COALESCE(SUM(CASE WHEN ProcessStatus = 'PENDING' THEN 1 ELSE 0 END), 0) AS PendingCount,
+                    COALESCE(SUM(CASE WHEN ProcessStatus = 'ACTIVATED' THEN 1 ELSE 0 END), 0) AS ActivatedCount,
+                    COALESCE(SUM(CASE WHEN ProcessStatus = 'ALREADY_ACTIVE' THEN 1 ELSE 0 END), 0) AS AlreadyActiveCount,
+                    COALESCE(SUM(CASE WHEN ProcessStatus = 'FAILED' THEN 1 ELSE 0 END), 0) AS FailedCount,
+                    COALESCE(SUM(CASE WHEN ProcessStatus = 'NOT_FOUND' THEN 1 ELSE 0 END), 0) AS NotFoundCount
                 FROM DiagnosticImagingPatients;";
 
-            using var cmd = new SqlCommand(sql, conn);
+            using var cmd = new NpgsqlCommand(sql, conn);
             using var reader = await cmd.ExecuteReaderAsync();
             if (await reader.ReadAsync())
             {
-                int total = reader.IsDBNull(0) ? 0 : reader.GetInt32(0);
-                int pending = reader.IsDBNull(1) ? 0 : reader.GetInt32(1);
-                int activated = reader.IsDBNull(2) ? 0 : reader.GetInt32(2);
-                int alreadyActive = reader.IsDBNull(3) ? 0 : reader.GetInt32(3);
-                int failed = reader.IsDBNull(4) ? 0 : reader.GetInt32(4);
-                int notFound = reader.IsDBNull(5) ? 0 : reader.GetInt32(5);
+                int total = reader.IsDBNull(0) ? 0 : Convert.ToInt32(reader.GetValue(0));
+                int pending = reader.IsDBNull(1) ? 0 : Convert.ToInt32(reader.GetValue(1));
+                int activated = reader.IsDBNull(2) ? 0 : Convert.ToInt32(reader.GetValue(2));
+                int alreadyActive = reader.IsDBNull(3) ? 0 : Convert.ToInt32(reader.GetValue(3));
+                int failed = reader.IsDBNull(4) ? 0 : Convert.ToInt32(reader.GetValue(4));
+                int notFound = reader.IsDBNull(5) ? 0 : Convert.ToInt32(reader.GetValue(5));
                 return (total, pending, activated, alreadyActive, failed, notFound);
             }
 
@@ -294,32 +289,77 @@ namespace SIS_WEBVIEW2
         }
 
         /// <summary>
-        /// Tự động kiểm tra và thêm các cột theo dõi gửi email vào database nếu chưa tồn tại
+        /// Tự động kiểm tra và khởi tạo database & schema bảng PostgreSQL nếu chưa tồn tại
         /// </summary>
         public static async Task EnsureDatabaseSchemaAsync(string connectionString)
         {
             try
             {
-                using var conn = new SqlConnection(connectionString);
+                // Bước 1: Đảm bảo Database tồn tại (kết nối tạm qua database mặc định 'postgres' để kiểm tra & tạo nếu thiếu)
+                try
+                {
+                    var csb = new NpgsqlConnectionStringBuilder(connectionString);
+                    string targetDb = string.IsNullOrWhiteSpace(csb.Database) ? "sis_patient_db" : csb.Database;
+
+                    var adminCsb = new NpgsqlConnectionStringBuilder(connectionString)
+                    {
+                        Database = "postgres"
+                    };
+
+                    using (var adminConn = new NpgsqlConnection(adminCsb.ConnectionString))
+                    {
+                        await adminConn.OpenAsync();
+                        using var checkCmd = new NpgsqlCommand("SELECT 1 FROM pg_database WHERE datname = @db;", adminConn);
+                        checkCmd.Parameters.AddWithValue("@db", targetDb);
+                        var exists = await checkCmd.ExecuteScalarAsync();
+
+                        if (exists == null)
+                        {
+                            string safeDbName = targetDb.Replace("\"", "\"\"");
+                            using var createCmd = new NpgsqlCommand($"CREATE DATABASE \"{safeDbName}\";", adminConn);
+                            await createCmd.ExecuteNonQueryAsync();
+                        }
+                    }
+                }
+                catch
+                {
+                    // Bỏ qua nếu user không có quyền trên database 'postgres' hoặc database đã sẵn sàng
+                }
+
+                // Bước 2: Tạo các bảng & cột cần thiết nếu chưa có
+                using var conn = new NpgsqlConnection(connectionString);
                 await conn.OpenAsync();
 
                 const string sql = @"
-                    IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('PatientAccessInfo') AND name = 'EmailSentStatus')
-                    BEGIN
-                        ALTER TABLE PatientAccessInfo ADD EmailSentStatus NVARCHAR(50) NULL DEFAULT 'PENDING';
-                    END
+                    CREATE TABLE IF NOT EXISTS DiagnosticImagingPatients (
+                        PatientCode VARCHAR(50) PRIMARY KEY,
+                        FullName VARCHAR(255),
+                        Address TEXT,
+                        PhoneNumber VARCHAR(50),
+                        Email VARCHAR(255),
+                        SentDate TEXT,
+                        ProcessStatus VARCHAR(50) DEFAULT 'PENDING',
+                        FetchedAt TIMESTAMP DEFAULT NOW(),
+                        ProcessedAt TIMESTAMP
+                    );
 
-                    IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('PatientAccessInfo') AND name = 'EmailSentAt')
-                    BEGIN
-                        ALTER TABLE PatientAccessInfo ADD EmailSentAt DATETIME NULL;
-                    END
+                    CREATE TABLE IF NOT EXISTS PatientAccessInfo (
+                        PatientId VARCHAR(50) PRIMARY KEY,
+                        PatientName VARCHAR(255),
+                        Username VARCHAR(100),
+                        TemporaryPassword VARCHAR(100),
+                        PortalUrl TEXT,
+                        SavedAt TIMESTAMP DEFAULT NOW(),
+                        EmailSentStatus VARCHAR(50) DEFAULT 'PENDING',
+                        EmailSentAt TIMESTAMP,
+                        EmailError TEXT
+                    );
 
-                    IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('PatientAccessInfo') AND name = 'EmailError')
-                    BEGIN
-                        ALTER TABLE PatientAccessInfo ADD EmailError NVARCHAR(MAX) NULL;
-                    END";
+                    ALTER TABLE PatientAccessInfo ADD COLUMN IF NOT EXISTS EmailSentStatus VARCHAR(50) DEFAULT 'PENDING';
+                    ALTER TABLE PatientAccessInfo ADD COLUMN IF NOT EXISTS EmailSentAt TIMESTAMP;
+                    ALTER TABLE PatientAccessInfo ADD COLUMN IF NOT EXISTS EmailError TEXT;";
 
-                using var cmd = new SqlCommand(sql, conn);
+                using var cmd = new NpgsqlCommand(sql, conn);
                 await cmd.ExecuteNonQueryAsync();
             }
             catch
@@ -335,12 +375,12 @@ namespace SIS_WEBVIEW2
         {
             if (string.IsNullOrWhiteSpace(patientId)) return null;
 
-            using var conn = new SqlConnection(connectionString);
+            using var conn = new NpgsqlConnection(connectionString);
             await conn.OpenAsync();
 
-            const string sql = @"SELECT TOP 1 Email FROM DiagnosticImagingPatients WHERE PatientCode = @PatientCode;";
-            using var cmd = new SqlCommand(sql, conn);
-            cmd.Parameters.AddWithValue("@PatientCode", patientId);
+            const string sql = @"SELECT Email FROM DiagnosticImagingPatients WHERE PatientCode = @PatientCode LIMIT 1;";
+            using var cmd = new NpgsqlCommand(sql, conn);
+            cmd.Parameters.Add(new NpgsqlParameter("@PatientCode", NpgsqlDbType.Varchar) { Value = patientId });
 
             var obj = await cmd.ExecuteScalarAsync();
             if (obj != null && obj != DBNull.Value)
@@ -362,23 +402,22 @@ namespace SIS_WEBVIEW2
         {
             if (string.IsNullOrWhiteSpace(patientId)) return;
 
-            using var conn = new SqlConnection(connectionString);
+            using var conn = new NpgsqlConnection(connectionString);
             await conn.OpenAsync();
 
             const string sql = @"
                 UPDATE PatientAccessInfo
                 SET EmailSentStatus = @Status,
-                    EmailSentAt = CASE WHEN @Status = 'SENT' THEN GETDATE() ELSE EmailSentAt END,
+                    EmailSentAt = CASE WHEN @Status = 'SENT' THEN NOW() ELSE EmailSentAt END,
                     EmailError = @Error
                 WHERE PatientId = @PatientId;";
 
-            using var cmd = new SqlCommand(sql, conn);
-            cmd.Parameters.AddWithValue("@PatientId", patientId);
-            cmd.Parameters.AddWithValue("@Status", status);
-            cmd.Parameters.AddWithValue("@Error", (object?)error ?? DBNull.Value);
+            using var cmd = new NpgsqlCommand(sql, conn);
+            cmd.Parameters.Add(new NpgsqlParameter("@PatientId", NpgsqlDbType.Varchar) { Value = patientId });
+            cmd.Parameters.Add(new NpgsqlParameter("@Status", NpgsqlDbType.Varchar) { Value = status });
+            cmd.Parameters.Add(new NpgsqlParameter("@Error", NpgsqlDbType.Text) { Value = (object?)error ?? DBNull.Value });
 
             await cmd.ExecuteNonQueryAsync();
         }
     }
 }
-

@@ -1,0 +1,8 @@
+{
+  "Host": "localhost",
+  "Port": 5432,
+  "Database": "sis_patient_db",
+  "Username": "postgres",
+  "Password": "ZZ@adm01",
+  "ConnectionString": ""
+}
