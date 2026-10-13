@@ -1,15 +1,18 @@
-# Context & Rules cho Agent — SIS_WEBVIEW2
+# Context & Rules cho Agent — SIS_WEBVIEW2 (SIS_WORKER)
 
 > File này được tự động load bởi Antigravity IDE mỗi phiên làm việc.
 > Đọc README.md để có thông tin đầy đủ hơn.
 
 ## Dự Án Là Gì
 
-**SIS_WEBVIEW2** — WinForms .NET 8 + WebView2, tự động hóa việc kiểm tra
-trạng thái PatientID trên `https://portal.sisvietnam.vn`.
+**SIS_WORKER** — .NET 8 Worker Service (Windows Service), tự động kích hoạt tài khoản bệnh nhân
+trên `https://portal.sisvietnam.vn` bằng **HTTP trực tiếp** (không còn WebView2/WinForms).
 
-App mở browser (WebView2), tự đăng nhập, rồi tuần tự nhập từng PatientID
-vào input → click Apply → đọc kết quả (Đã active / Chưa active / Không có kết quả).
+Mỗi 2 phút: gọi API SIS lấy bệnh nhân CĐHA hôm nay → lưu DB (PENDING) → với mỗi ca PENDING:
+queryUsers → (chưa active) resolveFullPatient → isEmailUnique → saveUser (trả PDF base64)
+→ lưu `D:\SIS_SIEMENS_PDF` → đọc PDF lưu DB → gửi email.
+
+> Bản WebView2/WinForms cũ nằm ở git tag **`webview2-final`** (`git checkout webview2-final`).
 
 ---
 
@@ -17,36 +20,24 @@ vào input → click Apply → đọc kết quả (Đã active / Chưa active / 
 
 | File | Vai trò |
 |---|---|
-| `SIS_WEBVIEW2/Form1.cs` | Config đăng nhập, constructor, tải file ngầm |
-| `SIS_WEBVIEW2/Form1.Login.cs` | Logic auto-login qua JS inject |
-| `SIS_WEBVIEW2/Form1.PatientId.cs` | Điều phối vòng lặp PatientID, thống kê |
-| `SIS_WEBVIEW2/Form1.Activation.cs` | Quy trình chi tiết 6 bước kích hoạt bệnh nhân |
-| `SIS_WEBVIEW2/Form1.DomActions.cs` | Toàn bộ JS DOM helper & selectors ExtJS |
-| `SIS_WEBVIEW2/Form1.Designer.cs` | UI (panel/button/label layout) |
+| `SIS_WORKER/Program.cs` | Host, Windows Service, Serilog, bind config |
+| `SIS_WORKER/ActivationWorker.cs` | BackgroundService: vòng lặp API → DB → hàng đợi |
+| `SIS_WORKER/ActivationProcessor.cs` | Xử lý 1 bệnh nhân (tra cứu → kích hoạt → PDF → DB → email) |
+| `SIS_WORKER/PortalClient.cs` | HTTP client portal Liferay/ExtJS (login, token, queryUsers, saveUser) |
+| `SIS_WORKER/Options.cs` | WorkerOptions / PortalOptions / SisApiOptions |
+| `SIS_WORKER/PatientAccessService.cs` | Đọc PDF, truy vấn PostgreSQL |
+| `SIS_WORKER/appsettings.json` | Cấu hình mặc định (`DryRun=true`); secret ở `appsettings.local.json` (gitignored) |
 
 ---
 
 ## Điểm Cần Chú Ý Ngay
 
-1. **Selectors JS không ổn định** — `ext-modern-element-123` và `ext-modern-element-140`
-   là ExtJS dynamic ID. Nếu user báo app không tìm thấy input → inspect lại trước tiên.
-
-2. **Danh sách PatientID hardcode** trong `Form1.PatientId.cs`:
-   ```csharp
-   private static readonly List<string> _hardcodedPatientIds = new List<string> { "26767120" };
-   ```
-   Khi user muốn thêm/sửa ID → chỉnh mảng này.
-
-3. **Thông tin đăng nhập** ở `Form1.cs` dòng 11-13 (username: `cnud`).
-
----
-
-## TODO Hiện Tại (ưu tiên)
-
-1. 🔴 Test selector JS còn đúng không — nếu sai → dùng DevTools inspect lại
-2. 🟡 Cho nhập danh sách ID qua UI (TextBox) thay vì hardcode
-3. 🟡 Xuất kết quả ra CSV sau khi xử lý
-4. 🟢 Đổi tên app thành "SIS Auto"
+1. **API portal có thể đổi** — nếu log báo `Không lấy được p_auth/INSTANCE` hoặc `Portal báo lỗi`,
+   bắt lại HAR từ Chrome DevTools (Network → Save all as HAR) rồi đối chiếu với `PortalClient.cs`.
+   Không commit file HAR (chứa mật khẩu/cookie).
+2. **Luôn thử `Worker:DryRun=true` trước**; test kích hoạt thật với `Worker:MaxPatientsPerCycle=1`.
+3. `email_config.json` có `OverrideRecipientEmail` (hòm thư test) — xoá khi chạy thật.
+4. Không chạy đồng thời 2 bản worker (xử lý trùng ca).
 
 ---
 
@@ -55,5 +46,4 @@ vào input → click Apply → đọc kết quả (Đã active / Chưa active / 
 - Luôn đọc `README.md` để nắm tiến độ mới nhất trước khi bắt đầu
 - Sau mỗi thay đổi quan trọng, cập nhật mục **Trạng Thái Tiến Độ** trong `README.md`
 - Không xóa comments tiếng Việt trong code — chúng là context quan trọng
-- Khi sửa selector JS, test bằng cách chạy trong Console của DevTools WebView2 trước
 - Khi tạo các file test hay script debug, tạo trực tiếp trong thư mục project (workspace) để dễ dàng theo dõi và quản lý, tránh tạo ở các thư mục tạm bên ngoài. Xóa bỏ hoặc dọn dẹp các file tạm này khi kết thúc thử nghiệm.

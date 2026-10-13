@@ -1,8 +1,8 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Text.Json;
 
-namespace SIS_WEBVIEW2
+namespace SIS_WORKER
 {
     public class DbConfig
     {

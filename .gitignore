@@ -482,3 +482,11 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# HAR / debug captures (ch?a cookie, m?t kh?u)
+scripts/*.har
+scripts/har_*.txt
+
+# Secrets c?c b? c?a SIS_WORKER
+SIS_WORKER/appsettings.local.json
+SIS_WORKER/logs/

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -8,7 +8,7 @@ using Npgsql;
 using NpgsqlTypes;
 using UglyToad.PdfPig;
 
-namespace SIS_WEBVIEW2
+namespace SIS_WORKER
 {
     public class PatientAccessDto
     {
