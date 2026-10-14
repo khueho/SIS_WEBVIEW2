@@ -1,7 +1,4 @@
-# Cài SIS_WORKER thành Windows Service. Chạy bằng PowerShell "Run as Administrator".
-# Cách dùng:
-#   .\install-service.ps1                  # publish + cài + khởi động
-#   .\install-service.ps1 -InstallDir D:\SIS_WORKER
+# Cai SIS_WORKER thanh Windows Service. Chay bang PowerShell "Run as Administrator".
 param(
     [string]$InstallDir = "D:\SIS_WORKER",
     [string]$ServiceName = "SIS_WORKER"
@@ -13,29 +10,33 @@ $proj = Join-Path $root "SIS_WORKER\SIS_WORKER.csproj"
 
 Write-Host "==> Publish ra $InstallDir"
 if (Get-Service $ServiceName -ErrorAction SilentlyContinue) {
-    Write-Host "==> Dừng service cũ"
+    Write-Host "==> Dung service cu"
     Stop-Service $ServiceName -Force
     Start-Sleep -Seconds 2
 }
 dotnet publish $proj -c Release -r win-x64 --self-contained false -o $InstallDir
 
-# appsettings.local.json (secret) không nằm trong publish nếu thiếu → nhắc người dùng
+# appsettings.local.json (secret) khong nam trong publish neu thieu -> nhac nguoi dung
 if (-not (Test-Path (Join-Path $InstallDir "appsettings.local.json"))) {
-    Write-Warning "Thiếu $InstallDir\appsettings.local.json (Portal:Username/Password, SisApi:ClientSecret). Hãy tạo trước khi chạy."
+    Write-Warning "Thieu $InstallDir\appsettings.local.json (Portal:Username/Password, SisApi:ClientSecret). Hay tao truoc khi chay."
 }
 
 $exe = Join-Path $InstallDir "SIS_WORKER.exe"
 if (-not (Get-Service $ServiceName -ErrorAction SilentlyContinue)) {
-    Write-Host "==> Tạo service $ServiceName"
+    Write-Host "==> Tao service $ServiceName"
     New-Service -Name $ServiceName -BinaryPathName "`"$exe`"" `
-        -DisplayName "SIS Worker - Tự động kích hoạt bệnh nhân" `
-        -Description "Quét API SIS và kích hoạt tài khoản bệnh nhân trên portal (HTTP, không cần trình duyệt)." `
+        -DisplayName "SIS Patient Activation Worker" `
+        -Description "Automatically activates patient portal accounts via HTTP and sends notification emails." `
         -StartupType Automatic | Out-Null
-    # Tự khởi động lại khi lỗi (sau 1 phút, tối đa 3 lần liên tiếp)
+    # Tu khoi dong lai khi loi (sau 1 phut, toi da 3 lan lien tiep)
     sc.exe failure $ServiceName reset= 86400 actions= restart/60000/restart/60000/restart/60000 | Out-Null
+} else {
+    # Cap nhat thong tin hien thi neu service da ton tai
+    sc.exe config $ServiceName DisplayName= "SIS Patient Activation Worker" | Out-Null
+    sc.exe description $ServiceName "Automatically activates patient portal accounts via HTTP and sends notification emails." | Out-Null
 }
 
-Write-Host "==> Khởi động service (nhớ đặt Worker:DryRun=false trong appsettings khi chạy thật)"
+Write-Host "==> Khoi dong service"
 Start-Service $ServiceName
 Get-Service $ServiceName
 Write-Host "Log: $InstallDir\logs\"

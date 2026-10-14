@@ -1,4 +1,4 @@
-﻿# SIS_WORKER — Tự động kích hoạt tài khoản bệnh nhân (Windows Service)
+# SIS_WORKER — Tự động kích hoạt tài khoản bệnh nhân (Windows Service)
 
 **Dự án:** .NET 8 Worker Service (chạy ngầm, không giao diện).
 **Mục tiêu:** Tự động quét danh sách bệnh nhân chẩn đoán hình ảnh trong ngày từ API SIS, kích hoạt tài khoản
@@ -84,6 +84,11 @@ $env:Worker__RunOnce='true'; $env:Worker__DryRun='false'; $env:Worker__MaxPatien
 .\scripts\uninstall-service.ps1
 ```
 Log: `<thư mục cài>\logs\sis_worker-YYYYMMDD.log` (giữ 30 ngày).
+
+> 📖 **Xem tài liệu chi tiết:**
+> - [Báo cáo đánh giá năng lực & hiệu năng xử lý (.md)](file:///d:/repo/SIS/SIS_WEBVIEW2/BAO_CAO_HIEU_NANG_XU_LY.md) | [Bản Word (.docx)](file:///d:/repo/SIS/SIS_WEBVIEW2/BAO_CAO_HIEU_NANG_XU_LY.docx)
+> - [Hướng dẫn chạy thực tế 24/7](file:///d:/repo/SIS/SIS_WEBVIEW2/HUONG_DAN_VAN_HANH_24_7.md)
+> - [Giải thích chi tiết cấu hình appsettings.json](file:///d:/repo/SIS/SIS_WEBVIEW2/CAU_HINH_APPSETTINGS.md)
 
 ## Lưu ý vận hành
 - Portal đổi API/phiên bản → service sẽ ghi lỗi `Portal báo lỗi...` / `Không lấy được p_auth...` trong log.
