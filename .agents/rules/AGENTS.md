@@ -12,7 +12,7 @@ Mỗi 2 phút: gọi API SIS lấy bệnh nhân CĐHA hôm nay → lưu DB (PEND
 queryUsers → (chưa active) resolveFullPatient → isEmailUnique → saveUser (trả PDF base64)
 → lưu `D:\SIS_SIEMENS_PDF` → đọc PDF lưu DB → gửi email.
 
-> Bản WebView2/WinForms cũ nằm ở git tag **`webview2-final`** (`git checkout webview2-final`).
+> Bản WebView2/WinForms cũ nằm ở branch **`legacy-webview2`** hoặc tag **`webview2-final`** (`git checkout legacy-webview2`).
 
 ---
 

@@ -6,7 +6,7 @@ trên `https://portal.sisvietnam.vn` bằng HTTP trực tiếp, lưu PDF thông 
 
 > 🔙 **Quay lại phiên bản WebView2/WinForms (tự động hoá bằng trình duyệt):**
 > ```powershell
-> git checkout webview2-final      # tag trỏ vào commit cuối cùng còn bản WebView2
+> git checkout legacy-webview2   # hoặc: git checkout webview2-final
 > ```
 > Từ commit này trở đi, project WebView2 đã bị xoá để gọn nhẹ (chỉ còn 1 project `SIS_WORKER`).
 
