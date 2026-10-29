@@ -20,7 +20,7 @@ public class PortalApiException : Exception
 }
 
 /// <summary>Kết quả tra cứu bệnh nhân (operation=queryUsers).</summary>
-public sealed record PortalPatient(string Code, bool IsUser, string FullName, JsonNode PatientId);
+public sealed record PortalPatient(string Code, bool IsUser, string FullName, JsonNode PatientId, string? UserId = null);
 
 /// <summary>Kết quả kích hoạt (operation=saveUser): file PDF thông tin truy cập.</summary>
 public sealed record ActivationResult(byte[] PdfBytes, string FileName);
@@ -203,20 +203,25 @@ public sealed class PortalClient : IDisposable
             JsonNode? pid = hit["patientId"]?.DeepClone();
             if (pid == null) throw new PortalApiException("queryUsers không trả patientId.");
 
-            return new PortalPatient(patientCode, isUser, full, pid);
+            string? userId = hit["userId"]?.ToString();
+
+            return new PortalPatient(patientCode, isUser, full, pid, userId);
         }, ct);
 
-    /// <summary>Lấy thông tin đầy đủ (operation=resolveFullPatient) → node "patient".</summary>
-    public Task<JsonNode> ResolveFullPatientAsync(PortalPatient p, CancellationToken ct) =>
+    /// <summary>
+    /// Lấy thông tin đầy đủ (operation=resolveFullPatient) → node "patient".
+    /// forExistingUser=true: bệnh nhân đã là user (luồng reset mật khẩu) → gửi kèm userId, prepareForUpgrade=false như UI.
+    /// </summary>
+    public Task<JsonNode> ResolveFullPatientAsync(PortalPatient p, CancellationToken ct, bool forExistingUser = false) =>
         WithSessionAsync(async () =>
         {
             var fields = new Dictionary<string, string>
             {
-                ["userId"] = "",
+                ["userId"] = forExistingUser ? (p.UserId ?? "") : "",
                 ["patientId"] = p.PatientId.ToJsonString(),
                 ["forceReload"] = "true",
                 ["generateIdentifier"] = "false",
-                ["prepareForUpgrade"] = "",
+                ["prepareForUpgrade"] = forExistingUser ? "false" : "",
                 ["operation"] = "resolveFullPatient",
                 ["componentInstanceID"] = ""
             };
@@ -256,13 +261,66 @@ public sealed class PortalClient : IDisposable
                 ["componentInstanceID"] = ""
             };
             JsonNode root = await PostPortletAsync(fields, ct);
-
-            string? b64 = root["data"]?[0]?["content"]?.GetValue<string>();
-            if (string.IsNullOrWhiteSpace(b64)) throw new PortalApiException("saveUser không trả PDF (content rỗng).");
-
-            string fileName = root["data"]?[0]?["fileName"]?.GetValue<string>() ?? $"Access_Information_{patientCode}.pdf";
-            return new ActivationResult(Convert.FromBase64String(b64), fileName);
+            return ParsePdfResult(root, patientCode, "saveUser");
         }, ct);
+
+    /// <summary>
+    /// Nhấn nút "Tạo mật khẩu mới" bước 1 (operation=generatePassword). Portal sinh mật khẩu và (nhiều khả năng) giữ theo phiên
+    /// để bước update dùng → PHẢI gọi ngay trước ResetPasswordAsync, trong cùng phiên (PortalClient riêng của luồng reset).
+    /// </summary>
+    public Task GeneratePasswordAsync(CancellationToken ct) =>
+        WithSessionAsync(async () =>
+        {
+            var fields = new Dictionary<string, string>
+            {
+                ["operation"] = "generatePassword",
+                ["componentInstanceID"] = ""
+            };
+            await PostPortletAsync(fields, ct);
+            return true;
+        }, ct);
+
+    /// <summary>
+    /// Reset mật khẩu bệnh nhân đã active (operation=update, passwordResetRequired=true). Portal tự sinh mật khẩu mới
+    /// và trả PDF thông tin truy cập (giống lúc kích hoạt). Giữ nguyên email hiện có của user.
+    /// </summary>
+    public Task<ActivationResult> ResetPasswordAsync(PortalPatient p, JsonNode patient, string patientCode, CancellationToken ct) =>
+        WithSessionAsync(async () =>
+        {
+            string svnr = patient["svnr"]?.GetValue<string>() ?? patientCode;
+            string email = patient["email"]?.ToString()
+                           ?? patient["telecomAddresses"]?[0]?["value"]?.ToString()
+                           ?? $"{patientCode}@gmail.com";
+
+            JsonObject user = BuildUserJson(patient, patientCode, email, forSave: true);
+            // UI gửi birthdate dạng ISO đầy đủ (yyyy-MM-ddT00:00:00.000Z) khi update
+            string? bd = user["birthdate"]?.ToString();
+            if (bd is { Length: 10 }) user["birthdate"] = bd + "T00:00:00.000Z";
+
+            var fields = new Dictionary<string, string>
+            {
+                ["patient"] = user.ToJsonString(),
+                ["passwordResetRequired"] = "true",
+                ["userId"] = p.UserId ?? "",
+                ["userLanguage"] = "en-US",
+                ["username"] = svnr,
+                ["triggerPatientSelfOnboarding"] = "false",
+                ["operation"] = "update",
+                ["componentInstanceID"] = ""
+            };
+            JsonNode root = await PostPortletAsync(fields, ct);
+            return ParsePdfResult(root, patientCode, "update");
+        }, ct);
+
+    /// <summary>Tách PDF base64 (data[0].content + fileName) từ response saveUser / update.</summary>
+    private static ActivationResult ParsePdfResult(JsonNode root, string patientCode, string operation)
+    {
+        string? b64 = root["data"]?[0]?["content"]?.GetValue<string>();
+        if (string.IsNullOrWhiteSpace(b64)) throw new PortalApiException($"{operation} không trả PDF (content rỗng).");
+
+        string fileName = root["data"]?[0]?["fileName"]?.GetValue<string>() ?? $"Access_Information_{patientCode}.pdf";
+        return new ActivationResult(Convert.FromBase64String(b64), fileName);
+    }
 
     // ───────────────────────── Helper nội bộ ─────────────────────────
 

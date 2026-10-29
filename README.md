@@ -29,6 +29,22 @@ Mỗi 2 phút (PollingIntervalSeconds):
   Lỗi bất kỳ ở 1 ca → FAILED, tiếp tục ca sau. Hết phiên portal → tự đăng nhập lại.
 ```
 
+### Luồng reset mật khẩu mặc định (PasswordResetWorker — song song, chỉ reset 1 lần)
+
+```
+Sau khi kích hoạt + lưu PDF/DB thành công: ResetDueAt = NOW() + 12h (PasswordReset:DelayHours)
+Mỗi 2 phút (PasswordReset:PollIntervalMinutes), nhặt MỌI ca ResetDueAt <= NOW() (theo lô 20, nguyên tử, SKIP LOCKED; MaxPerCycle<=0 = không giới hạn):
+  portal: queryUsers (lấy userId) → resolveFullPatient(userId) → generatePassword → update (passwordResetRequired=true)
+  → portal trả PDF mới → lưu D:\SIS_SIEMENS_PDF\[PatientID]_reset_[yyyyMMddHHmmss]_[FileName].pdf
+  → đọc PDF cập nhật PatientAccessInfo.TemporaryPassword → LastResetAt=NOW, ResetDueAt=NULL (không reset lại)
+  → xoá các PDF cũ của đúng mã đó. KHÔNG gửi email, KHÔNG gửi SMS.
+  Lỗi: ResetAttempts++, thử lại chu kỳ sau; đủ MaxAttempts (3) thì xoá lịch + log lỗi.
+```
+Ca kích hoạt trước khi bật tính năng có `ResetDueAt = NULL` → không bị reset. `PasswordReset:Enabled=false` mặc định.
+Luồng reset dùng **phiên portal riêng** (đăng nhập riêng, `PortalClient` riêng) nên chạy song song với luồng kích hoạt, không chờ nhau.
+Luồng API (sau này) chỉ đặt lịch bằng `PatientAccessService.ScheduleResetFromApiAsync` (chống trùng theo ngày qua `ResetRequestedDate`);
+SMS (làm sau) chỉ gửi cho account do API yêu cầu, không gửi cho reset mặc định.
+
 Các request portal được dựng lại từ HAR (Liferay + ExtJS): login 2 bước → lấy `p_auth` + `INSTANCE` từ HTML →
 các operation `queryUsers`, `resolveFullPatient`, `isEmailUnique`, `saveUser`.
 
@@ -39,9 +55,11 @@ SIS_WORKER.sln
 └── SIS_WORKER/
     ├── Program.cs              ← Host: Windows Service, Serilog (log file xoay ngày), bind config
     ├── ActivationWorker.cs     ← BackgroundService: vòng lặp 2 phút (API → DB → hàng đợi)
-    ├── ActivationProcessor.cs  ← Xử lý 1 bệnh nhân (tra cứu → kích hoạt → PDF → DB → email)
+    ├── ActivationProcessor.cs  ← Xử lý 1 bệnh nhân (tra cứu → kích hoạt → PDF → DB → email → đặt lịch reset)
+    ├── PasswordResetWorker.cs  ← BackgroundService: quét ca đến hạn reset mật khẩu
+    ├── PasswordResetProcessor.cs ← Reset mật khẩu 1 tài khoản (generatePassword → update → PDF → DB, xoá PDF cũ)
     ├── PortalClient.cs         ← HTTP client cho portal (login, queryUsers, saveUser, relogin)
-    ├── Options.cs              ← WorkerOptions / PortalOptions / SisApiOptions
+    ├── Options.cs              ← WorkerOptions / PortalOptions / SisApiOptions / PasswordResetOptions
     ├── PatientAccessService.cs ← Đọc PDF, truy vấn PostgreSQL, trạng thái
     ├── SisApiService.cs        ← OAuth2 + API lấy bệnh nhân CĐHA trong ngày
     ├── EmailService.cs         ← Gửi email (MailKit), cấu hình trong email_config.json
@@ -66,6 +84,9 @@ scripts/
 | `Worker:DownloadFolder` | Thư mục lưu PDF (`D:\SIS_SIEMENS_PDF`) |
 | `Portal:*` | `BaseUrl`, `Username`, `Password`, `TabId`, `Fingerprint`, `IgnoreSslErrors` |
 | `SisApi:*` | `BaseUrl`, `TenantId`, `ClientId`, `ClientSecret`, `Scope` |
+| `PasswordReset:Enabled` | `false` (mặc định): bật luồng reset mật khẩu sau kích hoạt |
+| `PasswordReset:DelayHours` | Số giờ từ lúc kích hoạt đến lúc reset (mặc định 12) |
+| `PasswordReset:PollIntervalMinutes` / `MaxPerCycle` / `MaxAttempts` | Chu kỳ quét (2 phút) / số ca tối đa mỗi chu kỳ (0 = không giới hạn; đặt 1 khi test thật) / số lần thử tối đa (3) |
 
 Mọi khoá đều ghi đè được bằng biến môi trường dạng `Worker__DryRun=false`.
 `email_config.json` có `OverrideRecipientEmail`: nếu có giá trị, **mọi email gửi về hòm thư test** thay vì bệnh nhân — xoá khi chạy thật.
@@ -95,11 +116,18 @@ Log: `<thư mục cài>\logs\sis_worker-YYYYMMDD.log` (giữ 30 ngày).
 - `saveUser` có payload với các key `"0".."7"` (ký tự của PatientID) — do UI ExtJS gửi như vậy, được giữ nguyên.
 - Thông tin truy cập portal & SMTP đang là secret dạng plain text trong file config; không commit `appsettings.local.json`.
 
-## Trạng thái tiến độ (cập nhật: 2026-10-13)
+## Trạng thái tiến độ (cập nhật: 2026-10-29)
 
 - [x] Chuyển từ WebView2/WinForms sang Worker Service gọi HTTP (tag `webview2-final` giữ bản cũ)
 - [x] Test DryRun + test kích hoạt thật 1 ca (`saveUser` → PDF → DB → email test) thành công
 - [x] Script cài/gỡ Windows Service, log file xoay theo ngày
 - [x] PostgreSQL (Npgsql), trạng thái `PENDING/ACTIVATED/ALREADY_ACTIVE/FAILED/NOT_FOUND`, theo dõi gửi email
+- [x] Bổ sung lưu trữ `PhoneNumber` vào bảng `PatientAccessInfo` và đồng bộ số điện thoại từ `DiagnosticImagingPatients`
 - [ ] Cài service thật trên máy chủ và chạy với `DryRun=false` (xoá `OverrideRecipientEmail`)
+- [x] Luồng reset mật khẩu mặc định (1 lần, 12h sau kích hoạt, không gửi email/SMS) — code xong, build OK; **chưa test thật** (bật `PasswordReset:Enabled=true`, test với `MaxPerCycle=1`)
+- [ ] Luồng API lấy danh sách account cần reset lại (dùng `ScheduleResetFromApiAsync`, đã chuẩn bị sẵn hàm DB) + gửi SMS cho account do API yêu cầu
 - [ ] Xuất báo cáo CSV sau mỗi chu kỳ (tuỳ chọn)
+
+### API reset giả lập (ResetApi)
+- `ResetScheduleWorker` mỗi `ResetApi:PollIntervalMinutes` phút lấy danh sách mã từ `IResetRequestSource` (hiện `MockResetRequestSource` đọc `ResetApi:MockPatientCodes`) → `ScheduleResetFromApiAsync` (đến hạn ngay; mỗi mã tối đa 1 lần/ngày). `PasswordResetWorker` sẽ reset. Không gửi email/SMS.
+- Khi có API thật: viết class implement `IResetRequestSource` và đổi đăng ký trong `Program.cs`.

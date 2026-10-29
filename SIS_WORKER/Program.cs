@@ -33,9 +33,16 @@ builder.Logging.AddSerilog(Log.Logger, dispose: true);
 builder.Services.Configure<WorkerOptions>(builder.Configuration.GetSection("Worker"));
 builder.Services.Configure<PortalOptions>(builder.Configuration.GetSection("Portal"));
 builder.Services.Configure<SisApiOptions>(builder.Configuration.GetSection("SisApi"));
+builder.Services.Configure<PasswordResetOptions>(builder.Configuration.GetSection("PasswordReset"));
+builder.Services.Configure<ResetApiOptions>(builder.Configuration.GetSection("ResetApi"));
 
 builder.Services.AddSingleton<PortalClient>();
 builder.Services.AddSingleton<ActivationProcessor>();
+builder.Services.AddSingleton<PasswordResetProcessor>();
 builder.Services.AddHostedService<ActivationWorker>();
+builder.Services.AddHostedService<PasswordResetWorker>();
+// Nguồn danh sách reset: hiện là API giả lập; khi có API thật thì thay bằng class khác implement IResetRequestSource
+builder.Services.AddSingleton<IResetRequestSource, MockResetRequestSource>();
+builder.Services.AddHostedService<ResetScheduleWorker>();
 
 await builder.Build().RunAsync();

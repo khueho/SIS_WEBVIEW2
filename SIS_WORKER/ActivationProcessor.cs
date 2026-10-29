@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Nodes;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -21,13 +21,15 @@ public sealed class ActivationProcessor
 {
     private readonly PortalClient _portal;
     private readonly WorkerOptions _opt;
+    private readonly PasswordResetOptions _reset;
     private readonly ILogger<ActivationProcessor> _logger;
     private readonly string _conn = DatabaseConfigService.GetConnectionString();
 
-    public ActivationProcessor(PortalClient portal, IOptions<WorkerOptions> options, ILogger<ActivationProcessor> logger)
+    public ActivationProcessor(PortalClient portal, IOptions<WorkerOptions> options, IOptions<PasswordResetOptions> resetOptions, ILogger<ActivationProcessor> logger)
     {
         _portal = portal;
         _opt = options.Value;
+        _reset = resetOptions.Value;
         _logger = logger;
     }
 
@@ -93,7 +95,7 @@ public sealed class ActivationProcessor
             // Bước 6: Trích xuất PDF → DB → gửi email
             try
             {
-                PatientAccessDto dto = await PatientAccessService.ProcessAndSavePdfAsync(pdfPath, _conn);
+                PatientAccessDto dto = await PatientAccessService.ProcessAndSavePdfAsync(pdfPath, _conn, item.PhoneNumber);
                 if (string.IsNullOrWhiteSpace(dto.PatientId))
                 {
                     _logger.LogWarning("[{Code}] Không trích xuất được thông tin từ PDF (kiểm tra lại định dạng).", code);
@@ -101,6 +103,23 @@ public sealed class ActivationProcessor
                 else
                 {
                     _logger.LogInformation("[{Code}] Đã lưu DB: {Name} (Pass: {Pass})", dto.PatientId, dto.PatientName, dto.TemporaryPassword);
+
+                    // Đặt lịch reset mật khẩu mặc định (1 lần, sau DelayHours giờ kể từ lúc kích hoạt)
+                    if (_reset.Enabled)
+                    {
+                        try
+                        {
+                            bool scheduled = await PatientAccessService.ScheduleResetAsync(dto.PatientId, _reset.DelayHours, _conn);
+                            if (scheduled)
+                                _logger.LogInformation("[{Code}] Đã đặt lịch reset mật khẩu sau {Hours}h.", dto.PatientId, _reset.DelayHours);
+                            else
+                                _logger.LogWarning("[{Code}] Không đặt được lịch reset (chưa có dòng PatientAccessInfo).", dto.PatientId);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "[{Code}] Lỗi đặt lịch reset mật khẩu (bỏ qua, không ảnh hưởng kích hoạt).", dto.PatientId);
+                        }
+                    }
                     await SendEmailAsync(dto);
                 }
             }

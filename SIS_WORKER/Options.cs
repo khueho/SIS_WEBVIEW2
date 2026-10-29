@@ -25,6 +25,38 @@ public class WorkerOptions
     public int DelayBetweenPatientsMs { get; set; } = 500;
 }
 
+/// <summary>Cấu hình luồng reset mật khẩu mặc định (1 lần, sau DelayHours giờ kể từ lúc kích hoạt).</summary>
+public class PasswordResetOptions
+{
+    /// <summary>false: không chạy worker reset và không đặt lịch sau kích hoạt.</summary>
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>Số giờ từ lúc kích hoạt đến lúc reset mật khẩu.</summary>
+    public double DelayHours { get; set; } = 12;
+
+    /// <summary>Chu kỳ quét các ca đến hạn (phút).</summary>
+    public int PollIntervalMinutes { get; set; } = 2;
+
+    /// <summary>Số ca tối đa xử lý mỗi chu kỳ (&lt;= 0: không giới hạn). Dùng giới hạn nhỏ khi test thật.</summary>
+    public int MaxPerCycle { get; set; } = 0;
+
+    /// <summary>Số lần thử tối đa cho 1 ca trước khi bỏ cuộc (xoá lịch + log lỗi).</summary>
+    public int MaxAttempts { get; set; } = 3;
+}
+
+/// <summary>Cấu hình luồng lấy danh sách mã cần reset từ API (hiện là giả lập, API thật bổ sung sau).</summary>
+public class ResetApiOptions
+{
+    /// <summary>false: không lấy danh sách reset từ API.</summary>
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>Chu kỳ hỏi API (phút).</summary>
+    public int PollIntervalMinutes { get; set; } = 2;
+
+    /// <summary>Danh sách mã bệnh nhân mà API giả lập trả về.</summary>
+    public List<string> MockPatientCodes { get; set; } = new();
+}
+
 public class PortalOptions
 {
     public string BaseUrl { get; set; } = "https://portal.sisvietnam.vn";

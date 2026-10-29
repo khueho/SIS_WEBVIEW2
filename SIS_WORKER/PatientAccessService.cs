@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -17,12 +17,21 @@ namespace SIS_WORKER
         public string Username { get; set; } = string.Empty;
         public string TemporaryPassword { get; set; } = string.Empty;
         public string PortalUrl { get; set; } = "https://portal.sisvietnam.vn";
+        public string? PhoneNumber { get; set; }
     }
 
     public class PendingPatientItem
     {
         public string PatientCode { get; set; } = string.Empty;
         public string? Email { get; set; }
+        public string? PhoneNumber { get; set; }
+    }
+
+    /// <summary>Ca đến hạn reset mật khẩu (đã được claim/khoá).</summary>
+    public class DueResetItem
+    {
+        public string PatientCode { get; set; } = string.Empty;
+        public string? PhoneNumber { get; set; }
     }
 
     public static class PatientAccessService
@@ -75,13 +84,14 @@ namespace SIS_WORKER
             await conn.OpenAsync();
 
             const string sql = @"
-                INSERT INTO PatientAccessInfo (PatientId, PatientName, Username, TemporaryPassword, PortalUrl, SavedAt, EmailSentStatus)
-                VALUES (@Id, @Name, @User, @Pass, @Url, NOW(), 'PENDING')
+                INSERT INTO PatientAccessInfo (PatientId, PatientName, Username, TemporaryPassword, PortalUrl, PhoneNumber, SavedAt, EmailSentStatus)
+                VALUES (@Id, @Name, @User, @Pass, @Url, COALESCE(@Phone, (SELECT PhoneNumber FROM DiagnosticImagingPatients WHERE PatientCode = @Id LIMIT 1)), NOW(), 'PENDING')
                 ON CONFLICT (PatientId) DO UPDATE
                 SET PatientName = EXCLUDED.PatientName,
                     Username = EXCLUDED.Username,
                     TemporaryPassword = EXCLUDED.TemporaryPassword,
                     PortalUrl = EXCLUDED.PortalUrl,
+                    PhoneNumber = COALESCE(EXCLUDED.PhoneNumber, PatientAccessInfo.PhoneNumber, (SELECT PhoneNumber FROM DiagnosticImagingPatients WHERE PatientCode = EXCLUDED.PatientId LIMIT 1)),
                     SavedAt = NOW();";
 
             using var cmd = new NpgsqlCommand(sql, conn);
@@ -90,16 +100,21 @@ namespace SIS_WORKER
             cmd.Parameters.Add(new NpgsqlParameter("@User", NpgsqlDbType.Varchar) { Value = dto.Username });
             cmd.Parameters.Add(new NpgsqlParameter("@Pass", NpgsqlDbType.Varchar) { Value = dto.TemporaryPassword });
             cmd.Parameters.Add(new NpgsqlParameter("@Url", NpgsqlDbType.Text) { Value = dto.PortalUrl });
+            cmd.Parameters.Add(new NpgsqlParameter("@Phone", NpgsqlDbType.Varchar) { Value = (object?)dto.PhoneNumber ?? DBNull.Value });
 
             await cmd.ExecuteNonQueryAsync();
         }
 
         /// <summary>
-        /// Đọc và lưu 1 file PDF vào database
+        /// Đọc và lưu 1 file PDF vào database (kèm số điện thoại nếu có)
         /// </summary>
-        public static async Task<PatientAccessDto> ProcessAndSavePdfAsync(string pdfPath, string connectionString)
+        public static async Task<PatientAccessDto> ProcessAndSavePdfAsync(string pdfPath, string connectionString, string? phoneNumber = null)
         {
             var dto = ExtractFromPdf(pdfPath);
+            if (!string.IsNullOrWhiteSpace(phoneNumber))
+            {
+                dto.PhoneNumber = phoneNumber.Trim();
+            }
             await SaveToSqlAsync(dto, connectionString);
             return dto;
         }
@@ -190,7 +205,7 @@ namespace SIS_WORKER
             await conn.OpenAsync();
 
             const string sql = @"
-                SELECT PatientCode, Email 
+                SELECT PatientCode, Email, PhoneNumber 
                 FROM DiagnosticImagingPatients
                 WHERE ProcessStatus = 'PENDING'
                   AND PatientCode NOT IN (SELECT PatientId FROM PatientAccessInfo)
@@ -202,6 +217,7 @@ namespace SIS_WORKER
             {
                 string code = reader.GetString(0);
                 string? email = reader.IsDBNull(1) ? null : reader.GetString(1);
+                string? phone = reader.IsDBNull(2) ? null : reader.GetString(2);
 
                 // Loại trừ nếu trong DB còn sót email giả lập
                 if (IsFakeEmail(email, code))
@@ -214,7 +230,8 @@ namespace SIS_WORKER
                     result.Add(new PendingPatientItem
                     {
                         PatientCode = code,
-                        Email = email
+                        Email = email,
+                        PhoneNumber = phone
                     });
                 }
             }
@@ -349,15 +366,24 @@ namespace SIS_WORKER
                         Username VARCHAR(100),
                         TemporaryPassword VARCHAR(100),
                         PortalUrl TEXT,
+                        PhoneNumber VARCHAR(50),
                         SavedAt TIMESTAMP DEFAULT NOW(),
                         EmailSentStatus VARCHAR(50) DEFAULT 'PENDING',
                         EmailSentAt TIMESTAMP,
                         EmailError TEXT
                     );
 
+                    ALTER TABLE PatientAccessInfo ADD COLUMN IF NOT EXISTS PhoneNumber VARCHAR(50);
                     ALTER TABLE PatientAccessInfo ADD COLUMN IF NOT EXISTS EmailSentStatus VARCHAR(50) DEFAULT 'PENDING';
                     ALTER TABLE PatientAccessInfo ADD COLUMN IF NOT EXISTS EmailSentAt TIMESTAMP;
-                    ALTER TABLE PatientAccessInfo ADD COLUMN IF NOT EXISTS EmailError TEXT;";
+                    ALTER TABLE PatientAccessInfo ADD COLUMN IF NOT EXISTS EmailError TEXT;
+
+                    -- Reset mật khẩu theo lịch (ResetDueAt NULL = không có lịch reset)
+                    ALTER TABLE PatientAccessInfo ADD COLUMN IF NOT EXISTS ResetDueAt TIMESTAMP NULL;
+                    ALTER TABLE PatientAccessInfo ADD COLUMN IF NOT EXISTS LastResetAt TIMESTAMP NULL;
+                    ALTER TABLE PatientAccessInfo ADD COLUMN IF NOT EXISTS ResetAttempts INT NOT NULL DEFAULT 0;
+                    ALTER TABLE PatientAccessInfo ADD COLUMN IF NOT EXISTS ResetLockedUntil TIMESTAMP NULL;
+                    ALTER TABLE PatientAccessInfo ADD COLUMN IF NOT EXISTS ResetRequestedDate DATE NULL;";
 
                 using var cmd = new NpgsqlCommand(sql, conn);
                 await cmd.ExecuteNonQueryAsync();
@@ -418,6 +444,172 @@ namespace SIS_WORKER
             cmd.Parameters.Add(new NpgsqlParameter("@Error", NpgsqlDbType.Text) { Value = (object?)error ?? DBNull.Value });
 
             await cmd.ExecuteNonQueryAsync();
+        }
+
+        // ───────────────────────── Reset mật khẩu theo lịch ─────────────────────────
+
+        /// <summary>
+        /// Đặt lịch reset sau delayHours giờ (dùng sau khi kích hoạt). Trả false nếu chưa có dòng PatientAccessInfo.
+        /// Không đụng ResetRequestedDate (cột này chỉ dành cho luồng API).
+        /// </summary>
+        public static async Task<bool> ScheduleResetAsync(string patientId, double delayHours, string connectionString)
+        {
+            if (string.IsNullOrWhiteSpace(patientId)) return false;
+
+            using var conn = new NpgsqlConnection(connectionString);
+            await conn.OpenAsync();
+
+            const string sql = @"
+                UPDATE PatientAccessInfo
+                SET ResetDueAt = NOW() + (@Hours * INTERVAL '1 hour'),
+                    ResetAttempts = 0,
+                    ResetLockedUntil = NULL
+                WHERE PatientId = @PatientId;";
+
+            using var cmd = new NpgsqlCommand(sql, conn);
+            cmd.Parameters.Add(new NpgsqlParameter("@PatientId", NpgsqlDbType.Varchar) { Value = patientId });
+            cmd.Parameters.Add(new NpgsqlParameter("@Hours", NpgsqlDbType.Double) { Value = delayHours });
+            return await cmd.ExecuteNonQueryAsync() > 0;
+        }
+
+        /// <summary>
+        /// DÀNH CHO LUỒNG API SAU NÀY (chưa có nơi gọi): đặt lịch reset ngay (đến hạn lập tức).
+        /// Chống trùng khi API trả lại cùng account nhiều lần trong ngày: chỉ có hiệu lực nếu hôm nay chưa yêu cầu.
+        /// Trả true nếu đã đặt lịch; false nếu hôm nay đã yêu cầu rồi hoặc không có account.
+        /// </summary>
+        public static async Task<bool> ScheduleResetFromApiAsync(string patientId, string connectionString)
+        {
+            if (string.IsNullOrWhiteSpace(patientId)) return false;
+
+            using var conn = new NpgsqlConnection(connectionString);
+            await conn.OpenAsync();
+
+            const string sql = @"
+                UPDATE PatientAccessInfo
+                SET ResetDueAt = NOW(),
+                    ResetAttempts = 0,
+                    ResetLockedUntil = NULL,
+                    ResetRequestedDate = CURRENT_DATE
+                WHERE PatientId = @PatientId
+                  AND ResetRequestedDate IS DISTINCT FROM CURRENT_DATE;";
+
+            using var cmd = new NpgsqlCommand(sql, conn);
+            cmd.Parameters.Add(new NpgsqlParameter("@PatientId", NpgsqlDbType.Varchar) { Value = patientId });
+            return await cmd.ExecuteNonQueryAsync() > 0;
+        }
+
+        /// <summary>
+        /// Nhặt các ca đến hạn reset và khoá luôn (nguyên tử, SKIP LOCKED) để 2 tiến trình không nhặt trùng.
+        /// </summary>
+        public static async Task<List<DueResetItem>> ClaimDueResetsAsync(int limit, string connectionString)
+        {
+            var result = new List<DueResetItem>();
+
+            using var conn = new NpgsqlConnection(connectionString);
+            await conn.OpenAsync();
+
+            const string sql = @"
+                UPDATE PatientAccessInfo
+                SET ResetLockedUntil = NOW() + INTERVAL '15 minutes'
+                WHERE PatientId IN (
+                    SELECT PatientId FROM PatientAccessInfo
+                    WHERE ResetDueAt IS NOT NULL
+                      AND ResetDueAt <= NOW()
+                      AND (ResetLockedUntil IS NULL OR ResetLockedUntil < NOW())
+                    ORDER BY ResetDueAt
+                    LIMIT @Limit
+                    FOR UPDATE SKIP LOCKED)
+                RETURNING PatientId, PhoneNumber;";
+
+            using var cmd = new NpgsqlCommand(sql, conn);
+            cmd.Parameters.Add(new NpgsqlParameter("@Limit", NpgsqlDbType.Integer) { Value = Math.Max(1, limit) });
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                result.Add(new DueResetItem
+                {
+                    PatientCode = reader.GetString(0),
+                    PhoneNumber = reader.IsDBNull(1) ? null : reader.GetString(1)
+                });
+            }
+            return result;
+        }
+
+        /// <summary>Xem trước các ca đến hạn (KHÔNG khoá) — dùng cho DryRun.</summary>
+        public static async Task<List<DueResetItem>> PreviewDueResetsAsync(int limit, string connectionString)
+        {
+            var result = new List<DueResetItem>();
+
+            using var conn = new NpgsqlConnection(connectionString);
+            await conn.OpenAsync();
+
+            const string sql = @"
+                SELECT PatientId, PhoneNumber FROM PatientAccessInfo
+                WHERE ResetDueAt IS NOT NULL
+                  AND ResetDueAt <= NOW()
+                  AND (ResetLockedUntil IS NULL OR ResetLockedUntil < NOW())
+                ORDER BY ResetDueAt
+                LIMIT @Limit;";
+
+            using var cmd = new NpgsqlCommand(sql, conn);
+            cmd.Parameters.Add(new NpgsqlParameter("@Limit", NpgsqlDbType.Integer) { Value = Math.Max(1, limit) });
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                result.Add(new DueResetItem
+                {
+                    PatientCode = reader.GetString(0),
+                    PhoneNumber = reader.IsDBNull(1) ? null : reader.GetString(1)
+                });
+            }
+            return result;
+        }
+
+        /// <summary>Reset thành công: ghi LastResetAt, xoá lịch (chỉ reset 1 lần), bỏ khoá.</summary>
+        public static async Task MarkResetDoneAsync(string patientId, string connectionString)
+        {
+            if (string.IsNullOrWhiteSpace(patientId)) return;
+
+            using var conn = new NpgsqlConnection(connectionString);
+            await conn.OpenAsync();
+
+            const string sql = @"
+                UPDATE PatientAccessInfo
+                SET LastResetAt = NOW(),
+                    ResetDueAt = NULL,
+                    ResetAttempts = 0,
+                    ResetLockedUntil = NULL
+                WHERE PatientId = @PatientId;";
+
+            using var cmd = new NpgsqlCommand(sql, conn);
+            cmd.Parameters.Add(new NpgsqlParameter("@PatientId", NpgsqlDbType.Varchar) { Value = patientId });
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        /// <summary>
+        /// Reset lỗi: tăng ResetAttempts. Chưa quá maxAttempts → giữ lịch, khoá ngắn 1 phút để thử lại ở chu kỳ sau.
+        /// Đủ maxAttempts → xoá lịch (dừng thử). Trả true nếu đã bỏ cuộc.
+        /// </summary>
+        public static async Task<bool> MarkResetFailedAsync(string patientId, int maxAttempts, string connectionString)
+        {
+            if (string.IsNullOrWhiteSpace(patientId)) return false;
+
+            using var conn = new NpgsqlConnection(connectionString);
+            await conn.OpenAsync();
+
+            const string sql = @"
+                UPDATE PatientAccessInfo
+                SET ResetAttempts = ResetAttempts + 1,
+                    ResetDueAt = CASE WHEN ResetAttempts + 1 >= @Max THEN NULL ELSE ResetDueAt END,
+                    ResetLockedUntil = CASE WHEN ResetAttempts + 1 >= @Max THEN NULL ELSE NOW() + INTERVAL '1 minute' END
+                WHERE PatientId = @PatientId
+                RETURNING (ResetAttempts >= @Max) AS gave_up;";
+
+            using var cmd = new NpgsqlCommand(sql, conn);
+            cmd.Parameters.Add(new NpgsqlParameter("@PatientId", NpgsqlDbType.Varchar) { Value = patientId });
+            cmd.Parameters.Add(new NpgsqlParameter("@Max", NpgsqlDbType.Integer) { Value = Math.Max(1, maxAttempts) });
+            var res = await cmd.ExecuteScalarAsync();
+            return res is bool b && b;
         }
     }
 }

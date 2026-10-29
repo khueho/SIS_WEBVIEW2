@@ -19,6 +19,23 @@ Tài liệu này giải thích chi tiết ý nghĩa, vai trò và tính chất c
 
 ---
 
+## 1b. Nhóm cấu hình `PasswordReset` (Reset mật khẩu tự động, chỉ 1 lần)
+
+Sau khi kích hoạt tài khoản, hệ thống tự đặt lịch reset mật khẩu (portal sinh mật khẩu mới + PDF mới, cập nhật DB). Mỗi tài khoản chỉ reset **1 lần**, không gửi email/SMS.
+
+| Tham số | Giá trị mặc định | Giải thích chi tiết |
+| :--- | :--- | :--- |
+| `Enabled` | `false` | Bật/tắt luồng reset. `false`: không đặt lịch sau kích hoạt và worker reset không chạy. |
+| `DelayHours` | `12` | Số **giờ** từ lúc kích hoạt đến lúc reset mật khẩu. |
+| `PollIntervalMinutes` | `2` | Chu kỳ quét các ca đến hạn reset, tính theo **phút**. |
+| `MaxPerCycle` | `0` | Số ca tối đa reset trong mỗi chu kỳ quét. `0` (hoặc số âm) = **không giới hạn**, reset hết mọi ca đã đến hạn. Khi test thật nên đặt `1`. |
+| `MaxAttempts` | `3` | Số lần thử tối đa cho 1 ca khi reset lỗi. Đủ số lần thì xoá lịch reset và ghi log lỗi, không thử nữa. |
+
+> `Worker:DryRun=true` cũng áp dụng cho reset: chỉ ghi log các ca đến hạn, không reset thật.
+> **Lưu ý:** `appsettings.json` không nên chứa comment `//` (một số công cụ/IDE báo lỗi), nên phần giải thích các khoá nằm ở tài liệu này.
+
+---
+
 ## 2. Nhóm cấu hình `Portal` (Kết nối Portal SIS Vietnam)
 
 | Tham số | Giá trị mẫu | Giải thích chi tiết & Tính chất cố định |
